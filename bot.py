@@ -7,7 +7,7 @@ import os
 import re
 
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
-GOOGLE_API_KEY = 'AIzaSyBqwFMCenOKSKns3nHiBq_pF2uWbky3tkU'
+GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY')
 
 genai.configure(api_key=GOOGLE_API_KEY)
 SELECTED_MODEL = 'models/gemini-2.5-flash'
