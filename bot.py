@@ -1,3 +1,16 @@
+import telebot
+from telebot import util
+import anthropic
+import requests
+import base64
+import os
+
+TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
+ANTHROPIC_KEY = os.environ.get('ANTHROPIC_KEY')
+
+client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
+bot = telebot.TeleBot(TELEGRAM_TOKEN)
+
 SYSTEM_PROMPT = (
     "Ты - нормативный ассистент инженера ООС АО ПетроКазахстан Кумколь Ресорсиз, Казахстан. "
     "Месторождения КАМ - Кызылкия, Арыскум, Майбулак.\n\n"
@@ -51,3 +64,56 @@ SYSTEM_PROMPT = (
     "   [размер штрафа]\n"
     "   https://adilet.zan.kz/rus/docs/K1400000235"
 )
+
+@bot.message_handler(commands=['start', 'help'])
+def send_welcome(message):
+    bot.send_message(message.chat.id,
+        "Нормативный ассистент ПККР\n\n"
+        "Опиши нарушение или отправь фото\n"
+        "Пример: Разлив нефти на скважине")
+
+@bot.message_handler(func=lambda message: True)
+def handle_text(message):
+    wait_msg = bot.send_message(message.chat.id, "Ищу нормы...")
+    try:
+        response = client.messages.create(
+            model="claude-sonnet-4-5",
+            max_tokens=800,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": message.text}]
+        )
+        answer = response.content[0].text.strip()
+        bot.delete_message(message.chat.id, wait_msg.message_id)
+        for part in util.smart_split(answer, chars_per_string=3000):
+            bot.send_message(message.chat.id, part)
+    except Exception as e:
+        bot.edit_message_text("Ошибка: " + str(e), message.chat.id, wait_msg.message_id)
+
+@bot.message_handler(content_types=['photo'])
+def handle_photo(message):
+    wait_msg = bot.send_message(message.chat.id, "Анализирую фото...")
+    try:
+        file_id = message.photo[-1].file_id
+        file_info = bot.get_file(file_id)
+        file_url = "https://api.telegram.org/file/bot" + TELEGRAM_TOKEN + "/" + file_info.file_path
+        photo_bytes = requests.get(file_url).content
+        photo_b64 = base64.b64encode(photo_bytes).decode('utf-8')
+        caption = message.caption or "Определи нарушения на фото и укажи нормы законодательства РК"
+        response = client.messages.create(
+            model="claude-sonnet-4-5",
+            max_tokens=800,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": [
+                {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": photo_b64}},
+                {"type": "text", "text": caption}
+            ]}]
+        )
+        answer = response.content[0].text.strip()
+        bot.delete_message(message.chat.id, wait_msg.message_id)
+        for part in util.smart_split(answer, chars_per_string=3000):
+            bot.send_message(message.chat.id, part)
+    except Exception as e:
+        bot.edit_message_text("Ошибка: " + str(e), message.chat.id, wait_msg.message_id)
+
+print("БОТ ЗАПУЩЕН")
+bot.polling(none_stop=True, interval=1)
