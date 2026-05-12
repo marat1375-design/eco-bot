@@ -46,26 +46,30 @@ def search_relevant_chunks(laws, query, max_chars=12000):
         'ядерн': ['atom'],
         'нефт': ['ecocode', 'nedra'],
         'скважин': ['ecocode'],
-        'разлив': ['ecocode'],
-        'розлив': ['ecocode'],
-        'сточн': ['ecocode'],
-        'отход': ['ecocode', 'sanpin2'],
-        'шлам': ['ecocode'],
-        'замазучен': ['ecocode'],
-        'загрязнен': ['ecocode'],
-        'земл': ['ecocode'],
-        'почв': ['ecocode'],
-        'атмосфер': ['ecocode'],
-        'выброс': ['ecocode'],
-        'тбо': ['sanpin2', 'ecocode'],
-        'мусор': ['sanpin2', 'ecocode'],
+        'разлив': ['ecocode', 'koap'],
+        'розлив': ['ecocode', 'koap'],
+        'пластов': ['ecocode', 'nedra'],
+        'сточн': ['ecocode', 'koap'],
+        'отход': ['ecocode', 'sanpin2', 'koap'],
+        'шлам': ['ecocode', 'nedra'],
+        'замазучен': ['ecocode', 'nedra'],
+        'загрязнен': ['ecocode', 'koap'],
+        'земл': ['ecocode', 'koap'],
+        'почв': ['ecocode', 'koap'],
+        'атмосфер': ['ecocode', 'koap'],
+        'выброс': ['ecocode', 'koap'],
+        'сброс': ['ecocode', 'koap'],
+        'тбо': ['sanpin2', 'ecocode', 'koap'],
+        'мусор': ['sanpin2', 'ecocode', 'koap'],
         'контейнер': ['sanpin2'],
-        'свалк': ['ecocode', 'sanpin2'],
-         'недр': ['nedra'],
+        'свалк': ['ecocode', 'sanpin2', 'koap'],
+        'недр': ['nedra', 'koap'],
         'штраф': ['koap'],
         'ответственност': ['koap'],
         'нарушени': ['koap', 'ecocode'],
         'санкци': ['koap'],
+        'разрешени': ['ecocode', 'koap'],
+    }
 
     files_to_search = set()
     for word in words:
@@ -74,7 +78,7 @@ def search_relevant_chunks(laws, query, max_chars=12000):
                 files_to_search.update(files)
 
     if not files_to_search:
-        files_to_search = {'ecocode'}
+        files_to_search = {'ecocode', 'koap'}
 
     results = []
     for key in files_to_search:
@@ -108,7 +112,7 @@ def search_relevant_chunks(laws, query, max_chars=12000):
         context += chunk
         total += len(chunk)
 
-    print("Найдено символов для запроса: " + str(total))
+    print("Найдено символов: " + str(total))
     return context
 
 LAWS = load_laws()
@@ -123,17 +127,19 @@ SYSTEM_PROMPT = (
     "- Опечатки и ошибки в запросе - понимай по контексту\n"
     "- Цитируй статьи точно как написано в тексте\n"
     "- Никогда не используй законы РФ\n"
-    "- Максимум 3 нормы\n"
-    "- Ссылки на adilet.zan.kz\n\n"
+    "- Максимум 3 нормы из Экокодекса/СанПиН + 1 статья КоАП со штрафом\n"
+    "- Ссылки: Экокодекс - https://adilet.zan.kz/rus/docs/K2100000400, "
+    "КоАП - https://adilet.zan.kz/rus/docs/K1400000235\n\n"
     "ФОРМАТ ОТВЕТА:\n\n"
     "НАРУШЕНИЕ: [одно предложение]\n\n"
     "НОРМЫ:\n"
     "1. [Название закона - Ст.XX - название статьи]\n"
     "   [Точная цитата из предоставленного текста]\n"
     "   https://adilet.zan.kz/...\n\n"
-    "ШТРАФ: [если есть в тексте]\n\n"
-    "Если подходящих статей нет в предоставленных фрагментах - напиши: "
-    "В базе данных подходящих статей не найдено."
+    "ШТРАФ по КоАП РК:\n"
+    "[Ст.XXX - название - размер штрафа для юрлиц]\n"
+    "https://adilet.zan.kz/rus/docs/K1400000235\n\n"
+    "Если подходящих статей нет - напиши: В базе данных подходящих статей не найдено."
 )
 
 @bot.message_handler(commands=['start', 'help'])
@@ -186,8 +192,7 @@ def handle_photo(message):
 
         photo_response = model.generate_content([
             "Опиши кратко (1-2 предложения) что нарушено на этом фото "
-            "с точки зрения экологии на нефтегазовом объекте в Казахстане. "
-            "Только описание нарушения, без лишних слов.",
+            "с точки зрения экологии на нефтегазовом объекте в Казахстане.",
             {"mime_type": "image/jpeg", "data": photo_b64}
         ])
         violation_desc = photo_response.text.strip()
@@ -210,5 +215,5 @@ def handle_photo(message):
     except Exception as e:
         bot.edit_message_text("Ошибка: " + str(e), message.chat.id, wait_msg.message_id)
 
-print("БОТ ЗАПУЩЕН - Gemini + RAG")
+print("БОТ ЗАПУЩЕН - Gemini + RAG + КоАП")
 bot.polling(none_stop=True, interval=1)
