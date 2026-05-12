@@ -88,7 +88,11 @@ def search_relevant_chunks(laws, query, max_chars=12000):
             violation_type = 'отход'
     elif any(w in query_lower for w in ['сточн', 'вод']) and any(w in query_lower for w in ['разлив', 'розлив', 'сброс']):
         violation_type = 'разлив_вода'
-    elif any(w in query_lower for w in ['замазучен', 'шлам']):
+    elif any(w in query_lower for w in ['пластов']):
+        if any(w in query_lower for w in ['разлив', 'розлив', 'утечк', 'сброс']):
+            violation_type = 'разлив_вода'
+        else:
+            violation_type = 'разлив_нефть'
         violation_type = 'замазучен'
     elif any(w in query_lower for w in ['мусор', 'тбо', 'свалк', 'контейнер']):
         violation_type = 'свалка'
