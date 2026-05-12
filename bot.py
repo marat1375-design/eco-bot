@@ -61,8 +61,11 @@ def search_relevant_chunks(laws, query, max_chars=12000):
         'мусор': ['sanpin2', 'ecocode'],
         'контейнер': ['sanpin2'],
         'свалк': ['ecocode', 'sanpin2'],
-        'недр': ['nedra'],
-    }
+         'недр': ['nedra'],
+        'штраф': ['koap'],
+        'ответственност': ['koap'],
+        'нарушени': ['koap', 'ecocode'],
+        'санкци': ['koap'],
 
     files_to_search = set()
     for word in words:
