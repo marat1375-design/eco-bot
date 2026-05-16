@@ -12,16 +12,13 @@ import ssl
 def search_law(query):
     search_url = f"https://adilet.zan.kz/rus/search?q={urllib.parse.quote(query)}"
     
-    # Создаем контекст SSL с сертификатами из certifi
-    ssl_context = ssl.create_default_context(cafile=certifi.where())
-    
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
     }
 
     try:
-        # 1. Выполняем поисковой запрос с использованием SSL-контекста
-        response = requests.get(search_url, headers=headers, timeout=30, verify=ssl_context)
+        # 1. Выполняем поисковой запрос с проверкой сертификатов через certifi
+        response = requests.get(search_url, headers=headers, timeout=30, verify=certifi.where())
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
         
@@ -32,8 +29,8 @@ def search_law(query):
         doc_url = 'https://adilet.zan.kz' + first_link.get('href')
         doc_title = first_link.get_text(strip=True)
         
-        # 2. Открываем страницу документа с использованием SSL-контекста
-        doc_response = requests.get(doc_url, headers=headers, timeout=30, verify=ssl_context)
+        # 2. Открываем страницу документа
+        doc_response = requests.get(doc_url, headers=headers, timeout=30, verify=certifi.where())
         doc_response.raise_for_status()
         doc_soup = BeautifulSoup(doc_response.text, 'html.parser')
         
@@ -52,13 +49,6 @@ def search_law(query):
         return {"success": False, "error": f"Ошибка соединения: {str(e)}"}
     except Exception as e:
         return {"success": False, "error": f"Неизвестная ошибка: {str(e)}"}
-
-# ---------- 2. АНАЛИЗ через DeepSeek (без изменений) ----------
-async def get_deepseek_response(question, law_text):
-    api_key = os.getenv("DEEPSEEK_API_KEY")
-    if not api_key:
-        return "Ошибка: не настроен API-ключ DeepSeek."
-    
     url = "https://api.deepseek.com/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {api_key}",
