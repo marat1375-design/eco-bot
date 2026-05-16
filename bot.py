@@ -82,8 +82,8 @@ def search_relevant_chunks(laws, query, max_chars=12000):
     words = set(w for w in re.findall(r'[а-яёА-ЯЁ]{4,}', query_lower))
 
     # Определяем тип нарушения
-    violation_type = None
-    if any(w in query_lower for w in ['нефт', 'углеводород', 'пластов']):
+  violation_type = None
+    if any(w in query_lower for w in ['нефт', 'углеводород']):
         if any(w in query_lower for w in ['разлив', 'розлив', 'утечк', 'авари']):
             violation_type = 'разлив_нефть'
         else:
@@ -95,6 +95,7 @@ def search_relevant_chunks(laws, query, max_chars=12000):
             violation_type = 'разлив_вода'
         else:
             violation_type = 'разлив_нефть'
+    elif any(w in query_lower for w in ['замазучен', 'замазал', 'шлам', 'нефтяное']):
         violation_type = 'замазучен'
     elif any(w in query_lower for w in ['мусор', 'тбо', 'свалк', 'контейнер']):
         violation_type = 'свалка'
