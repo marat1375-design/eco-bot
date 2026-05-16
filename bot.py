@@ -2,11 +2,13 @@ import os
 import requests
 import json
 import urllib.parse
+import urllib3
 from bs4 import BeautifulSoup
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-import certifi
-import ssl
+
+# Отключаем предупреждения о небезопасном SSL (нужно для работы с adilet.zan.kz)
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ---------- 1. ПОИСК ЗАКОНА через ПАРСИНГ adilet.zan.kz ----------
 def search_law(query):
@@ -17,11 +19,12 @@ def search_law(query):
     }
 
     try:
-        # 1. Выполняем поисковой запрос с проверкой сертификатов через certifi
-        response = requests.get(search_url, headers=headers, timeout=30, verify=certifi.where())
+        # 1. Выполняем поисковой запрос с отключенной проверкой SSL
+        response = requests.get(search_url, headers=headers, timeout=30, verify=False)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
         
+        # 2. Ищем первую ссылку на документ в результатах поиска
         first_link = soup.select_one('div.search-result-item a')
         if not first_link:
             return {"success": False, "error": "По вашему запросу ничего не найдено."}
@@ -29,11 +32,12 @@ def search_law(query):
         doc_url = 'https://adilet.zan.kz' + first_link.get('href')
         doc_title = first_link.get_text(strip=True)
         
-        # 2. Открываем страницу документа
-        doc_response = requests.get(doc_url, headers=headers, timeout=30, verify=certifi.where())
+        # 3. Открываем страницу документа и извлекаем текст
+        doc_response = requests.get(doc_url, headers=headers, timeout=30, verify=False)
         doc_response.raise_for_status()
         doc_soup = BeautifulSoup(doc_response.text, 'html.parser')
         
+        # Ищем основной блок с текстом документа
         content_div = doc_soup.select_one('div.document-text div.text-justify')
         if not content_div:
             content_div = doc_soup.select_one('div.document-text')
@@ -49,6 +53,13 @@ def search_law(query):
         return {"success": False, "error": f"Ошибка соединения: {str(e)}"}
     except Exception as e:
         return {"success": False, "error": f"Неизвестная ошибка: {str(e)}"}
+
+# ---------- 2. АНАЛИЗ через DeepSeek ----------
+async def get_deepseek_response(question, law_text):
+    api_key = os.getenv("DEEPSEEK_API_KEY")
+    if not api_key:
+        return "Ошибка: не настроен API-ключ DeepSeek."
+    
     url = "https://api.deepseek.com/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -79,8 +90,7 @@ def search_law(query):
     except Exception as e:
         return f"Ошибка при обращении к DeepSeek: {str(e)}"
 
-
-# ---------- 3. ОБРАБОТЧИК СООБЩЕНИЙ (без изменений) ----------
+# ---------- 3. ОБРАБОТЧИК СООБЩЕНИЙ ----------
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_question = update.message.text
     await update.message.reply_text("🔍 Ищу ответ в законах Казахстана, подождите немного...")
@@ -96,13 +106,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     final_response = f"{ai_answer}\n\n📎 *Источник:* [Ссылка на документ]({search_result['url']})"
     await update.message.reply_text(final_response, parse_mode='Markdown', disable_web_page_preview=True)
 
-
-# ---------- 4. КОМАНДА /start (без изменений) ----------
+# ---------- 4. КОМАНДА /start ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Привет! Я — юридический помощник РК. Задай мне вопрос, и я найду ответ в актуальных законах.")
 
-
-# ---------- 5. ЗАПУСК (без изменений) ----------
+# ---------- 5. ЗАПУСК ----------
 def main():
     token = os.getenv("TELEGRAM_TOKEN")
     if not token:
