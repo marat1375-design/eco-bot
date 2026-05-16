@@ -8,8 +8,10 @@ from bs4 import BeautifulSoup
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
+# Отключаем предупреждения SSL (для работы с adilet.zan.kz)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+# ---------- 1. ПОИСК ЗАКОНА НА adilet.zan.kz ----------
 def search_law(query):
     search_url = f"https://adilet.zan.kz/rus/search?q={urllib.parse.quote(query)}"
     headers = {
@@ -40,6 +42,7 @@ def search_law(query):
     except Exception as e:
         return {"success": False, "error": f"Неизвестная ошибка: {str(e)}"}
 
+# ---------- 2. АНАЛИЗ ЧЕРЕЗ DeepSeek ----------
 async def get_deepseek_response(question, law_text):
     api_key = os.getenv("DEEPSEEK_API_KEY")
     if not api_key:
@@ -71,30 +74,45 @@ async def get_deepseek_response(question, law_text):
     except Exception as e:
         return f"Ошибка при обращении к DeepSeek: {str(e)}"
 
+# ---------- 3. ОБРАБОТЧИК СООБЩЕНИЙ (БЕРЁМ ПОСЛЕДНЮЮ СТРОКУ) ----------
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_question = update.message.text
-    if not user_question:
+    raw = update.message.text
+    if not raw:
         await update.message.reply_text("Пожалуйста, напишите текстовый вопрос.")
         return
-    # Очистка от временных меток и имён в начале (если есть)
-    cleaned = re.sub(r'^\[\d+\.\d+\.\d+\s+\d+:\d+\]\s*\S+:\s*', '', user_question)
-    user_question = cleaned.strip()
-    if not user_question:
-        await update.message.reply_text("Не удалось распознать вопрос. Пожалуйста, напишите его заново.")
+
+    # Разбиваем на строки и берём последнюю непустую
+    lines = [line.strip() for line in raw.split('\n') if line.strip()]
+    if not lines:
+        await update.message.reply_text("Не удалось распознать вопрос.")
         return
+    last_line = lines[-1]
+
+    # Удаляем возможную временную метку и имя в начале последней строки
+    # Шаблон: [dd.mm.yyyy hh:mm] Имя: текст
+    cleaned = re.sub(r'^\[\d{1,2}\.\d{1,2}\.\d{4}\s+\d{1,2}:\d{2}\]\s*\S+:\s*', '', last_line)
+    user_question = cleaned.strip()
+
+    if not user_question:
+        await update.message.reply_text("Не удалось извлечь вопрос. Напишите его отдельным сообщением без цитирования.")
+        return
+
     await update.message.reply_text("🔍 Ищу ответ в законах Казахстана, подождите немного...")
     search_result = search_law(user_question)
     if not search_result["success"]:
         await update.message.reply_text(f"❌ {search_result['error']}")
         return
+
     await update.message.reply_text(f"📄 Нашёл документ: *{search_result['title']}*.\n🧠 Анализирую текст, еще секунду...", parse_mode='Markdown')
     ai_answer = await get_deepseek_response(user_question, search_result['text'])
     final_response = f"{ai_answer}\n\n📎 *Источник:* [Ссылка на документ]({search_result['url']})"
     await update.message.reply_text(final_response, parse_mode='Markdown', disable_web_page_preview=True)
 
+# ---------- 4. КОМАНДА /start ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Привет! Я — юридический помощник РК. Задай мне вопрос, и я найду ответ в актуальных законах.")
 
+# ---------- 5. ЗАПУСК ----------
 def main():
     token = os.getenv("TELEGRAM_TOKEN")
     if not token:
