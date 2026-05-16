@@ -5,6 +5,8 @@ import urllib.parse
 from bs4 import BeautifulSoup
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+import certifi
+import ssl
 
 # ---------- 1. ПОИСК ЗАКОНА через ПАРСИНГ adilet.zan.kz ----------
 def search_law(query):
