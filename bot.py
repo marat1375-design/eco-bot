@@ -54,7 +54,6 @@ DIRECT_ARTICLES = {
         'koap': ['Статья 297'],
     },
 }
-}
 
 def load_laws():
     laws = {}
@@ -294,5 +293,5 @@ def handle_photo(message):
     except Exception as e:
         bot.edit_message_text("Ошибка: " + str(e), message.chat.id, wait_msg.message_id)
 
-print("БОТ ЗАПУЩЕН - Gemini + RAG v7")
+print("БОТ ЗАПУЩЕН - Gemini + RAG v8")
 bot.polling(none_stop=True, interval=1)
