@@ -68,7 +68,7 @@ def load_laws():
             print("Не найден: " + filename + " - " + str(e))
     return laws
 
-def get_article_block(text, article_name):
+def  get_article_block(text, article_name):
     pattern = re.compile(r'(' + re.escape(article_name) + r'[\.\s][^\n]*\n(?:.*\n){0,30})', re.IGNORECASE)
     match = pattern.search(text)
     if match:
