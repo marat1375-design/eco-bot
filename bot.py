@@ -1,4 +1,4 @@
-port telebot
+import telebot
 from telebot import util
 import google.generativeai as genai
 import requests
