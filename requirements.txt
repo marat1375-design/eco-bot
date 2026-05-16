@@ -2,3 +2,4 @@ pyTelegramBotAPI
 google-generativeai
 requests
 python-telegram-bot>=21.9
+beautifulsoup4
