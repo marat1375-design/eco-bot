@@ -23,7 +23,6 @@ LAW_FILES = {
     'koap': ('koap_final.txt', 'КоАП РК - Кодекс об административных правонарушениях N 235-V'),
 }
 
-# Прямой маппинг нарушений -> нужные статьи
 DIRECT_ARTICLES = {
     'разлив_нефть': {
         'ecocode': ['Статья 135', 'Статья 136', 'Статья 137', 'Статья 145'],
@@ -34,25 +33,25 @@ DIRECT_ARTICLES = {
         'koap': ['Статья 328', 'Статья 336'],
     },
     'отход': {
-        'ecocode': ['Статья 302', 'Статья 303', 'Статья 304', 'Статья 305'],
+        'ecocode': ['Статья 321', 'Статья 322', 'Статья 339'],
         'koap': ['Статья 338'],
     },
     'свалка': {
-        'ecocode': ['Статья 302', 'Статья 303'],
+        'ecocode': ['Статья 321', 'Статья 339', 'Статья 351'],
         'koap': ['Статья 338'],
     },
+    'замазучен': {
+        'ecocode': ['Статья 135', 'Статья 136', 'Статья 321'],
+        'koap': ['Статья 337', 'Статья 338'],
+    },
     'атмосфер': {
-        'ecocode': ['Статья 188', 'Статья 189', 'Статья 190'],
-        'koap': ['Статья 328', 'Статья 336'],
+        'ecocode': ['Статья 188', 'Статья 189'],
+        'koap': ['Статья 315', 'Статья 316'],
     },
     'радиац': {
-        'atom': ['Статья 17', 'Статья 24', 'Статья 27'],
-        'sanpin1': ['параграф 5', 'параграф 10', 'параграф 18'],
+        'atom': ['Статья 17', 'Статья 24'],
+        'sanpin1': ['5', '10', '18'],
         'koap': ['Статья 297'],
-    },
-    'замазучен': {
-        'ecocode': ['Статья 135', 'Статья 136', 'Статья 302'],
-        'koap': ['Статья 337', 'Статья 338'],
     },
 }
 
@@ -79,22 +78,20 @@ def get_article_block(text, article_name):
 
 def search_relevant_chunks(laws, query, max_chars=12000):
     query_lower = query.lower()
-    words = set(w for w in re.findall(r'[а-яёА-ЯЁ]{4,}', query_lower))
 
-    # Определяем тип нарушения
-  violation_type = None
+    violation_type = None
     if any(w in query_lower for w in ['нефт', 'углеводород']):
         if any(w in query_lower for w in ['разлив', 'розлив', 'утечк', 'авари']):
             violation_type = 'разлив_нефть'
         else:
             violation_type = 'отход'
-    elif any(w in query_lower for w in ['сточн', 'вод']) and any(w in query_lower for w in ['разлив', 'розлив', 'сброс']):
-        violation_type = 'разлив_вода'
     elif any(w in query_lower for w in ['пластов']):
         if any(w in query_lower for w in ['разлив', 'розлив', 'утечк', 'сброс']):
             violation_type = 'разлив_вода'
         else:
             violation_type = 'разлив_нефть'
+    elif any(w in query_lower for w in ['сточн', 'вод']) and any(w in query_lower for w in ['разлив', 'розлив', 'сброс']):
+        violation_type = 'разлив_вода'
     elif any(w in query_lower for w in ['замазучен', 'замазал', 'шлам', 'нефтяное']):
         violation_type = 'замазучен'
     elif any(w in query_lower for w in ['мусор', 'тбо', 'свалк', 'контейнер']):
@@ -109,7 +106,6 @@ def search_relevant_chunks(laws, query, max_chars=12000):
     context = ""
     total = 0
 
-    # Если определили тип — берём конкретные статьи
     if violation_type and violation_type in DIRECT_ARTICLES:
         articles_map = DIRECT_ARTICLES[violation_type]
         for law_key, article_list in articles_map.items():
@@ -125,8 +121,8 @@ def search_relevant_chunks(laws, query, max_chars=12000):
                         total += len(chunk)
         print("Прямой поиск: " + str(violation_type) + " | символов: " + str(total))
 
-    # Если не нашли через прямой поиск — делаем обычный поиск
     if total < 1000:
+        words = set(w for w in re.findall(r'[а-яёА-ЯЁ]{4,}', query_lower))
         TOPICS = {
             'радиац': ['atom', 'sanpin1', 'sanpin2'],
             'нефт': ['ecocode', 'nedra', 'koap'],
@@ -165,21 +161,17 @@ def search_relevant_chunks(laws, query, max_chars=12000):
                 if len(block.strip()) < 100:
                     continue
                 block_lower = block.lower()
-                # Исключаем блоки с "определения" и "термин" если они не про нарушение
                 if 'термин' in block_lower and len(block) < 500:
                     continue
                 score = sum(2 if w in block_lower else 0 for w in words)
-                # Штрафные статьи получают бонус
                 if 'влечет штраф' in block_lower or 'влекут штраф' in block_lower:
                     score += 3
-                # Статьи про ущерб и загрязнение получают бонус
                 if any(x in block_lower for x in ['ущерб', 'загрязнен', 'рекультив', 'ликвидац']):
                     score += 2
                 if score > 0:
                     results.append((score, title, block[:2000]))
 
         results.sort(key=lambda x: x[0], reverse=True)
-
         seen = set()
         for score, title, block in results:
             key = block[:100]
@@ -199,17 +191,18 @@ LAWS = load_laws()
 
 SYSTEM_PROMPT = (
     "Ты - нормативный ассистент инженера ООС АО ПетроКазахстан Кумколь Ресорсиз, Казахстан.\n\n"
-    "ЗАДАЧА: по описанию нарушения найти применимые статьи законов РК.\n\n"
+    "ЗАДАЧА: найти в предоставленных фрагментах законов РК статьи применимые к нарушению.\n\n"
     "ПРАВИЛА:\n"
     "- Используй ТОЛЬКО статьи из предоставленных фрагментов\n"
     "- Опечатки - понимай по контексту\n"
     "- Никогда не используй законы РФ\n"
-    "- Максимум 3 статьи\n\n"
+    "- Максимум 3 статьи\n"
+    "- ОБЯЗАТЕЛЬНО приведи точную цитату из текста статьи\n\n"
     "ФОРМАТ ОТВЕТА:\n\n"
     "НАРУШЕНИЕ: [одно предложение]\n\n"
     "НАРУШЕНЫ СТАТЬИ:\n"
     "1. [Закон - Ст.XX - название статьи]\n"
-    "   [2-3 строки - суть статьи своими словами]\n\n"
+    "   [2-3 строки суть статьи своими словами]\n\n"
     "2. [следующая статья]\n\n"
     "ШТРАФЫ при проверке госорганами:\n"
     "[КоАП РК Ст.XXX - размер штрафа для юридических лиц в МРП и тенге]\n\n"
@@ -289,5 +282,5 @@ def handle_photo(message):
     except Exception as e:
         bot.edit_message_text("Ошибка: " + str(e), message.chat.id, wait_msg.message_id)
 
-print("БОТ ЗАПУЩЕН - Gemini + RAG + точный поиск")
+print("БОТ ЗАПУЩЕН - Gemini + RAG v6")
 bot.polling(none_stop=True, interval=1)
