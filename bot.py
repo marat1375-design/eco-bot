@@ -10,20 +10,21 @@ import ssl
 
 # ---------- 1. ПОИСК ЗАКОНА через ПАРСИНГ adilet.zan.kz ----------
 def search_law(query):
-    # Формируем URL для поиска на сайте
     search_url = f"https://adilet.zan.kz/rus/search?q={urllib.parse.quote(query)}"
+    
+    # Создаем контекст SSL с сертификатами из certifi
+    ssl_context = ssl.create_default_context(cafile=certifi.where())
     
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
     }
 
     try:
-        # 1. Выполняем поисковой запрос
-        response = requests.get(search_url, headers=headers, timeout=30)
+        # 1. Выполняем поисковой запрос с использованием SSL-контекста
+        response = requests.get(search_url, headers=headers, timeout=30, verify=ssl_context)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # 2. Ищем первую ссылку на документ в результатах поиска
         first_link = soup.select_one('div.search-result-item a')
         if not first_link:
             return {"success": False, "error": "По вашему запросу ничего не найдено."}
@@ -31,18 +32,16 @@ def search_law(query):
         doc_url = 'https://adilet.zan.kz' + first_link.get('href')
         doc_title = first_link.get_text(strip=True)
         
-        # 3. Открываем страницу документа и извлекаем текст
-        doc_response = requests.get(doc_url, headers=headers, timeout=30)
+        # 2. Открываем страницу документа с использованием SSL-контекста
+        doc_response = requests.get(doc_url, headers=headers, timeout=30, verify=ssl_context)
         doc_response.raise_for_status()
         doc_soup = BeautifulSoup(doc_response.text, 'html.parser')
         
-        # Ищем основной блок с текстом документа
         content_div = doc_soup.select_one('div.document-text div.text-justify')
         if not content_div:
             content_div = doc_soup.select_one('div.document-text')
             
         if content_div:
-            # Извлекаем текст, удаляя лишние пробелы и пустые строки
             full_text = ' '.join(content_div.stripped_strings)
         else:
             full_text = "Не удалось получить текст документа."
@@ -53,7 +52,6 @@ def search_law(query):
         return {"success": False, "error": f"Ошибка соединения: {str(e)}"}
     except Exception as e:
         return {"success": False, "error": f"Неизвестная ошибка: {str(e)}"}
-
 
 # ---------- 2. АНАЛИЗ через DeepSeek (без изменений) ----------
 async def get_deepseek_response(question, law_text):
