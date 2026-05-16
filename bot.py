@@ -23,36 +23,36 @@ LAW_FILES = {
     'koap': ('koap_final.txt', 'КоАП РК - Кодекс об административных правонарушениях N 235-V'),
 }
 
-DIRECT_ARTICLES = {
-    'разлив_нефть': {
-        'ecocode': ['Статья 135', 'Статья 136', 'Статья 137', 'Статья 145'],
-        'koap': ['Статья 337', 'Статья 356'],
-    },
-    'разлив_вода': {
-        'ecocode': ['Статья 135', 'Статья 136', 'Статья 137'],
-        'koap': ['Статья 328', 'Статья 336'],
-    },
-    'отход': {
-        'ecocode': ['Статья 339', 'Статья 322', 'Статья 351'],
-        'koap': ['Статья 338'],
-    },
-    'свалка': {
-        'ecocode': ['Статья 339', 'Статья 351', 'Статья 354'],
-        'koap': ['Статья 338'],
-    },
-    'замазучен': {
-        'ecocode': ['Статья 135', 'Статья 136', 'Статья 339'],
-        'koap': ['Статья 337', 'Статья 338'],
-    },
-    'атмосфер': {
-        'ecocode': ['Статья 188', 'Статья 189'],
-        'koap': ['Статья 315', 'Статья 316'],
-    },
-    'радиац': {
-        'atom': ['Статья 17', 'Статья 24'],
-        'sanpin1': ['5', '10', '18'],
-        'koap': ['Статья 297'],
-    },
+# Ключевые слова для определения файлов поиска
+FILE_KEYWORDS = {
+    'ecocode': [
+        'нефт', 'разлив', 'розлив', 'загрязнен', 'отход', 'мусор', 'свалк',
+        'замазучен', 'шлам', 'земл', 'почв', 'вод', 'сточн', 'выброс',
+        'атмосфер', 'воздух', 'рекультив', 'ущерб', 'экологич', 'контейнер',
+        'тбо', 'захоронен', 'размещен', 'утилизац', 'раздельн', 'сортировк',
+        'урна', 'пластов', 'скважин', 'факел', 'эмисс', 'сброс',
+    ],
+    'koap': [
+        'штраф', 'ответственност', 'нарушени', 'санкци', 'загрязнен',
+        'отход', 'земл', 'атмосфер', 'вод', 'недр', 'радиац',
+        'нефт', 'выброс', 'сброс', 'свалк', 'мусор',
+    ],
+    'atom': [
+        'радиац', 'излучен', 'ядерн', 'атомн', 'изотоп', 'дозиметр',
+        'рао', 'нуклид', 'фон', 'доза', 'беккерел', 'зиверт',
+    ],
+    'sanpin1': [
+        'радиац', 'излучен', 'доза', 'фон', 'дозиметр', 'ионизир',
+        'радиационн', 'нуклид', 'зиверт', 'беккерел',
+    ],
+    'sanpin2': [
+        'санитарн', 'тбо', 'мусор', 'контейнер', 'свалк', 'отход',
+        'гигиен', 'норматив', 'сбор', 'вывоз',
+    ],
+    'nedra': [
+        'недр', 'скважин', 'месторожден', 'добыч', 'пластов', 'углеводород',
+        'нефт', 'газ', 'недропользован',
+    ],
 }
 
 def load_laws():
@@ -78,119 +78,99 @@ def get_article_block(text, article_name):
 
 def search_relevant_chunks(laws, query, max_chars=12000):
     query_lower = query.lower()
+    words = set(w for w in re.findall(r'[а-яёА-ЯЁ]{4,}', query_lower))
 
-    violation_type = None
-    if any(w in query_lower for w in ['нефт', 'углеводород']):
-        if any(w in query_lower for w in ['разлив', 'розлив', 'утечк', 'авари']):
-            violation_type = 'разлив_нефть'
-        else:
-            violation_type = 'отход'
-    elif any(w in query_lower for w in ['пластов']):
-        if any(w in query_lower for w in ['разлив', 'розлив', 'утечк', 'сброс']):
-            violation_type = 'разлив_вода'
-        else:
-            violation_type = 'разлив_нефть'
-    elif any(w in query_lower for w in ['сточн', 'вод']) and any(w in query_lower for w in ['разлив', 'розлив', 'сброс']):
-        violation_type = 'разлив_вода'
-    elif any(w in query_lower for w in ['замазучен', 'замазал', 'шлам', 'нефтяное']):
-        violation_type = 'замазучен'
-    elif any(w in query_lower for w in ['мусор', 'тбо', 'свалк', 'контейнер']):
-        violation_type = 'свалка'
-    elif any(w in query_lower for w in ['отход', 'размещен', 'захоронен']):
-        violation_type = 'отход'
-    elif any(w in query_lower for w in ['выброс', 'атмосфер', 'воздух', 'факел']):
-        violation_type = 'атмосфер'
-    elif any(w in query_lower for w in ['радиац', 'излучен', 'ядерн', 'атомн']):
-        violation_type = 'радиац'
+    # Определяем файлы для поиска по ключевым словам
+    files_to_search = set()
+    for file_key, keywords in FILE_KEYWORDS.items():
+        for kw in keywords:
+            if any(kw in w or w in kw for w in words):
+                files_to_search.add(file_key)
+                break
 
+    # КоАП всегда включаем для штрафов
+    files_to_search.add('koap')
+
+    # Если ничего не нашли — ищем в Экокодексе
+    if len(files_to_search) <= 1:
+        files_to_search.add('ecocode')
+
+    print("Файлы для поиска: " + str(files_to_search))
+
+    # Ищем релевантные блоки во всех выбранных файлах
+    results = []
+    for key in files_to_search:
+        if key not in laws or not laws[key]['text']:
+            continue
+        text = laws[key]['text']
+        title = laws[key]['title']
+
+        blocks = re.split(r'(?=Статья\s+\d+)', text)
+        for block in blocks:
+            if len(block.strip()) < 100:
+                continue
+            block_lower = block.lower()
+
+            # Пропускаем блоки с только определениями
+            if 'термин' in block_lower and len(block) < 300:
+                continue
+
+            # Считаем релевантность
+            score = 0
+            for w in words:
+                if w in block_lower:
+                    score += 2
+
+            # Бонус за штрафные нормы
+            if 'влечет штраф' in block_lower or 'влекут штраф' in block_lower:
+                score += 4
+
+            # Бонус за нормы про ущерб и загрязнение
+            if any(x in block_lower for x in ['ущерб', 'загрязнен', 'рекультив', 'ликвидац', 'запрещает', 'обязан']):
+                score += 2
+
+            # Бонус за статьи про отходы
+            if any(x in block_lower for x in ['управлени отходами', 'сбор отходов', 'обращени с отходами']):
+                score += 3
+
+            if score > 0:
+                results.append((score, key, title, block[:2000]))
+
+    # Сортируем по релевантности
+    results.sort(key=lambda x: x[0], reverse=True)
+
+    # Берём топ блоки — не более 2 из каждого файла чтобы было разнообразие
     context = ""
     total = 0
+    file_counts = {}
+    seen = set()
 
-    if violation_type and violation_type in DIRECT_ARTICLES:
-        articles_map = DIRECT_ARTICLES[violation_type]
-        for law_key, article_list in articles_map.items():
-            if law_key not in laws or not laws[law_key]['text']:
-                continue
-            title = laws[law_key]['title']
-            for article in article_list:
-                block = get_article_block(laws[law_key]['text'], article)
-                if block:
-                    chunk = "\n=== " + title + " ===\n" + block + "\n"
-                    if total + len(chunk) <= max_chars:
-                        context += chunk
-                        total += len(chunk)
-        print("Прямой поиск: " + str(violation_type) + " | символов: " + str(total))
+    for score, file_key, title, block in results:
+        key = block[:100]
+        if key in seen:
+            continue
 
-    if total < 1000:
-        words = set(w for w in re.findall(r'[а-яёА-ЯЁ]{4,}', query_lower))
-        TOPICS = {
-            'радиац': ['atom', 'sanpin1', 'sanpin2'],
-            'нефт': ['ecocode', 'nedra', 'koap'],
-            'разлив': ['ecocode', 'koap'],
-            'розлив': ['ecocode', 'koap'],
-            'пластов': ['ecocode', 'nedra'],
-            'сточн': ['ecocode', 'koap'],
-            'отход': ['ecocode', 'koap'],
-            'шлам': ['ecocode', 'nedra'],
-            'замазучен': ['ecocode', 'koap'],
-            'загрязнен': ['ecocode', 'koap'],
-            'мусор': ['sanpin2', 'ecocode', 'koap'],
-            'свалк': ['ecocode', 'koap'],
-            'выброс': ['ecocode', 'koap'],
-            'недр': ['nedra', 'koap'],
-            'штраф': ['koap'],
-        }
+        # Не более 2 блоков из одного файла (кроме КоАП — 1 блок)
+        limit = 1 if file_key == 'koap' else 2
+        if file_counts.get(file_key, 0) >= limit:
+            continue
 
-        files_to_search = set()
-        for word in words:
-            for topic, files in TOPICS.items():
-                if topic in word or word in topic:
-                    files_to_search.update(files)
+        chunk = "\n=== " + title + " ===\n" + block + "\n"
+        if total + len(chunk) > max_chars:
+            break
 
-        if not files_to_search:
-            files_to_search = {'ecocode', 'koap'}
+        seen.add(key)
+        context += chunk
+        total += len(chunk)
+        file_counts[file_key] = file_counts.get(file_key, 0) + 1
 
-        results = []
-        for key in files_to_search:
-            if key not in laws or not laws[key]['text']:
-                continue
-            text = laws[key]['text']
-            title = laws[key]['title']
-            blocks = re.split(r'(?=Статья\s+\d+)', text)
-            for block in blocks:
-                if len(block.strip()) < 100:
-                    continue
-                block_lower = block.lower()
-                if 'термин' in block_lower and len(block) < 500:
-                    continue
-                score = sum(2 if w in block_lower else 0 for w in words)
-                if 'влечет штраф' in block_lower or 'влекут штраф' in block_lower:
-                    score += 3
-                if any(x in block_lower for x in ['ущерб', 'загрязнен', 'рекультив', 'ликвидац']):
-                    score += 2
-                if score > 0:
-                    results.append((score, title, block[:2000]))
-
-        results.sort(key=lambda x: x[0], reverse=True)
-        seen = set()
-        for score, title, block in results:
-            key = block[:100]
-            if key in seen:
-                continue
-            seen.add(key)
-            chunk = "\n=== " + title + " ===\n" + block + "\n"
-            if total + len(chunk) > max_chars:
-                break
-            context += chunk
-            total += len(chunk)
-
-    print("Итого символов: " + str(total))
+    print("Итого символов: " + str(total) + " из файлов: " + str(file_counts))
     return context
 
 LAWS = load_laws()
 
 SYSTEM_PROMPT = (
-    "Ты - нормативный ассистент инженера ООС АО ПетроКазахстан Кумколь Ресорсиз, Казахстан.\n"
+    "Ты - нормативный ассистент инженера ООС АО ПетропКазахстан Кумколь Ресорсиз, Казахстан.\n"
     "Я пишу предписания своим цехам и подрядчикам - не государственный инспектор.\n\n"
     "ЗАДАЧА: по описанию или фото нарушения найти применимые статьи законов РК.\n\n"
     "ПРАВИЛА:\n"
@@ -223,6 +203,7 @@ def send_welcome(message):
         "- Разлив нефти на скважине\n"
         "- Замазученность вокруг контейнеров\n"
         "- Несанкционированная свалка ТБО\n"
+        "- Превышение радиационного фона\n"
         "- Отправь фото нарушения")
 
 @bot.message_handler(func=lambda message: True)
@@ -293,5 +274,5 @@ def handle_photo(message):
     except Exception as e:
         bot.edit_message_text("Ошибка: " + str(e), message.chat.id, wait_msg.message_id)
 
-print("БОТ ЗАПУЩЕН - Gemini + RAG v8")
+print("БОТ ЗАПУЩЕН - Gemini + RAG v10")
 bot.polling(none_stop=True, interval=1)
