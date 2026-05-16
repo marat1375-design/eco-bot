@@ -68,11 +68,13 @@ def load_laws():
             print("Не найден: " + filename + " - " + str(e))
     return laws
 
-def  get_article_block(text, article_name):
-    pattern = re.compile(r'(' + re.escape(article_name) + r'[\.\s][^\n]*\n(?:.*\n){0,30})', re.IGNORECASE)
-    match = pattern.search(text)
-    if match:
-        return match.group(0)[:2000]
+def get_article_block(text, article_name):
+    lines = text.split('\n')
+    for i, line in enumerate(lines):
+        clean_line = line.strip().replace('**', '').replace('*', '')
+        if article_name in clean_line:
+            block_lines = lines[i:i+40]
+            return '\n'.join(block_lines)[:2000]
     return None
 
 def search_relevant_chunks(laws, query, max_chars=12000):
