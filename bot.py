@@ -190,21 +190,26 @@ def search_relevant_chunks(laws, query, max_chars=12000):
 LAWS = load_laws()
 
 SYSTEM_PROMPT = (
-    "Ты - нормативный ассистент инженера ООС АО ПетроКазахстан Кумколь Ресорсиз, Казахстан.\n\n"
-    "ЗАДАЧА: найти в предоставленных фрагментах законов РК статьи применимые к нарушению.\n\n"
+    "Ты - нормативный ассистент инженера ООС АО ПетроКазахстан Кумколь Ресорсиз, Казахстан.\n"
+    "Я пишу предписания своим цехам и подрядчикам - не государственный инспектор.\n\n"
+    "ЗАДАЧА: по описанию или фото нарушения найти применимые статьи законов РК.\n\n"
     "ПРАВИЛА:\n"
-    "- Используй ТОЛЬКО статьи из предоставленных фрагментов\n"
-    "- Опечатки - понимай по контексту\n"
+    "- Используй ТОЛЬКО статьи из предоставленных фрагментов законов\n"
+    "- Опечатки и ошибки - понимай по контексту\n"
     "- Никогда не используй законы РФ\n"
     "- Максимум 3 статьи\n"
-    "- ОБЯЗАТЕЛЬНО приведи точную цитату из текста статьи\n\n"
+    "- Приведи точную цитату или суть статьи\n\n"
     "ФОРМАТ ОТВЕТА:\n\n"
-    "НАРУШЕНИЕ: [одно предложение]\n\n"
-    "НАРУШЕНЫ СТАТЬИ:\n"
+    "НАРУШЕНИЕ: [что обнаружено - одно предложение]\n\n"
+    "НАРУШЕНЫ ТРЕБОВАНИЯ:\n"
     "1. [Закон - Ст.XX - название статьи]\n"
-    "   [2-3 строки суть статьи своими словами]\n\n"
-    "2. [следующая статья]\n\n"
-    "ШТРАФЫ при проверке госорганами:\n"
+    "   [суть требования 1-2 строки своими словами]\n\n"
+    "2. [следующая статья если есть]\n\n"
+    "ЧТО НЕОБХОДИМО УСТРАНИТЬ:\n"
+    "- [конкретное действие 1]\n"
+    "- [конкретное действие 2]\n"
+    "- [конкретное действие 3]\n\n"
+    "ПРИ ПРОВЕРКЕ ГОСОРГАНАМИ:\n"
     "[КоАП РК Ст.XXX - размер штрафа для юридических лиц в МРП и тенге]\n\n"
     "Если статей нет - напиши: В базе данных подходящих статей не найдено."
 )
@@ -213,8 +218,12 @@ SYSTEM_PROMPT = (
 def send_welcome(message):
     bot.send_message(message.chat.id,
         "Нормативный ассистент ПККР\n\n"
-        "Опиши нарушение или отправь фото\n"
-        "Пример: Разлив нефти на скважине")
+        "Опиши нарушение или отправь фото\n\n"
+        "Примеры:\n"
+        "- Разлив нефти на скважине\n"
+        "- Замазученность вокруг контейнеров\n"
+        "- Несанкционированная свалка ТБО\n"
+        "- Отправь фото нарушения")
 
 @bot.message_handler(func=lambda message: True)
 def handle_text(message):
@@ -232,7 +241,7 @@ def handle_text(message):
             SYSTEM_PROMPT + "\n\n"
             "=== ФРАГМЕНТЫ ИЗ БАЗЫ ЗАКОНОВ ===\n" +
             context +
-            "\n=== НАРУШЕНИЕ ОТ ПОЛЬЗОВАТЕЛЯ ===\n" +
+            "\n=== НАРУШЕНИЕ ===\n" +
             message.text
         )
         response = model.generate_content(full_query)
@@ -246,20 +255,21 @@ def handle_text(message):
 
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
-    wait_msg = bot.send_message(message.chat.id, "Анализирую фото и ищу нормы...")
+    wait_msg = bot.send_message(message.chat.id, "Анализирую фото...")
     try:
         file_id = message.photo[-1].file_id
         file_info = bot.get_file(file_id)
         file_url = "https://api.telegram.org/file/bot" + TELEGRAM_TOKEN + "/" + file_info.file_path
         photo_bytes = requests.get(file_url).content
         photo_b64 = base64.b64encode(photo_bytes).decode('utf-8')
-        caption = message.caption or "Определи нарушения на фото"
+        caption = message.caption or ""
 
         model = genai.GenerativeModel(SELECTED_MODEL)
 
         photo_response = model.generate_content([
-            "Опиши кратко (1-2 предложения) что нарушено на этом фото "
-            "с точки зрения экологии на нефтегазовом объекте в Казахстане.",
+            "Ты помощник инженера ООС нефтегазового предприятия в Казахстане.\n"
+            "Посмотри на фото и опиши кратко (1-2 предложения) какое экологическое нарушение видно.\n"
+            "Если есть подпись пользователя - учти её: " + caption,
             {"mime_type": "image/jpeg", "data": photo_b64}
         ])
         violation_desc = photo_response.text.strip()
@@ -277,10 +287,11 @@ def handle_photo(message):
         answer = response.text.strip()
 
         bot.delete_message(message.chat.id, wait_msg.message_id)
+        bot.send_message(message.chat.id, "На фото: " + violation_desc)
         for part in util.smart_split(answer, chars_per_string=3000):
             bot.send_message(message.chat.id, part)
     except Exception as e:
         bot.edit_message_text("Ошибка: " + str(e), message.chat.id, wait_msg.message_id)
 
-print("БОТ ЗАПУЩЕН - Gemini + RAG v6")
+print("БОТ ЗАПУЩЕН - Gemini + RAG v7")
 bot.polling(none_stop=True, interval=1)
