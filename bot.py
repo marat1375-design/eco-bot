@@ -36,6 +36,71 @@ SELECTED_MODEL = os.environ.get("GEMINI_MODEL", "models/gemini-2.5-flash")
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
 # ─────────────────────────────────────────────
+# СИСТЕМА ДОСТУПА
+# ─────────────────────────────────────────────
+
+# Твой Telegram ID — только ты можешь управлять ботом
+# Напиши /myid чтобы узнать свой ID
+ADMIN_ID = 0  # Замени на свой ID
+
+# Лимит запросов в день по умолчанию
+DEFAULT_DAILY_LIMIT = 30
+
+# Белый список: { user_id: { "name": "Имя", "limit": 30 } }
+WHITELIST: dict = {}
+
+# Счётчики запросов за день: { user_id: { "date": "2026-05-17", "count": 5 } }
+DAILY_COUNTERS: dict = {}
+
+
+def is_admin(user_id: int) -> bool:
+    return user_id == ADMIN_ID
+
+
+def is_allowed(user_id: int) -> bool:
+    if is_admin(user_id):
+        return True
+    return user_id in WHITELIST
+
+
+def check_limit(user_id: int) -> bool:
+    """True если лимит не исчерпан."""
+    if is_admin(user_id):
+        return True
+    if user_id not in WHITELIST:
+        return False
+    from datetime import date
+    today = str(date.today())
+    counter = DAILY_COUNTERS.get(user_id, {"date": today, "count": 0})
+    if counter["date"] != today:
+        counter = {"date": today, "count": 0}
+    limit = WHITELIST[user_id].get("limit", DEFAULT_DAILY_LIMIT)
+    return counter["count"] < limit
+
+
+def increment_counter(user_id: int):
+    from datetime import date
+    today = str(date.today())
+    counter = DAILY_COUNTERS.get(user_id, {"date": today, "count": 0})
+    if counter["date"] != today:
+        counter = {"date": today, "count": 0}
+    counter["count"] += 1
+    DAILY_COUNTERS[user_id] = counter
+
+
+def get_remaining(user_id: int) -> int:
+    if is_admin(user_id):
+        return 9999
+    from datetime import date
+    today = str(date.today())
+    counter = DAILY_COUNTERS.get(user_id, {"date": today, "count": 0})
+    if counter["date"] != today:
+        counter = {"date": today, "count": 0}
+    limit = WHITELIST.get(user_id, {}).get("limit", DEFAULT_DAILY_LIMIT)
+    return max(0, limit - counter["count"])
+
+
+# ─────────────────────────────────────────────
 # КОНСТАНТА ДЛЯ ПРЕДПИСАНИЙ
 # ─────────────────────────────────────────────
 
@@ -1452,8 +1517,103 @@ def send_welcome(message):
     )
 
 
+
+@bot.message_handler(commands=["myid"])
+def cmd_myid(message):
+    bot.send_message(message.chat.id, f"Ваш Telegram ID: {message.from_user.id}")
+
+
+@bot.message_handler(commands=["add"])
+def cmd_add(message):
+    if not is_admin(message.from_user.id):
+        return
+    parts = message.text.strip().split()
+    if len(parts) < 2 or not parts[1].isdigit():
+        bot.send_message(message.chat.id, "Использование: /add 123456789 [Имя] [лимит]")
+        return
+    uid = int(parts[1])
+    name = parts[2] if len(parts) > 2 else f"user_{uid}"
+    limit = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else DEFAULT_DAILY_LIMIT
+    WHITELIST[uid] = {"name": name, "limit": limit}
+    bot.send_message(message.chat.id, f"✅ Пользователь {name} ({uid}) добавлен. Лимит: {limit} запросов в день.")
+
+
+@bot.message_handler(commands=["remove"])
+def cmd_remove(message):
+    if not is_admin(message.from_user.id):
+        return
+    parts = message.text.strip().split()
+    if len(parts) < 2 or not parts[1].isdigit():
+        bot.send_message(message.chat.id, "Использование: /remove 123456789")
+        return
+    uid = int(parts[1])
+    if uid in WHITELIST:
+        name = WHITELIST[uid].get("name", uid)
+        del WHITELIST[uid]
+        bot.send_message(message.chat.id, f"❌ Пользователь {name} ({uid}) удалён.")
+    else:
+        bot.send_message(message.chat.id, "Пользователь не найден.")
+
+
+@bot.message_handler(commands=["users"])
+def cmd_users(message):
+    if not is_admin(message.from_user.id):
+        return
+    if not WHITELIST:
+        bot.send_message(message.chat.id, "Список пуст. Добавь пользователей командой /add")
+        return
+    lines = ["Список пользователей:"]
+    for uid, info in WHITELIST.items():
+        remaining = get_remaining(uid)
+        lines.append(f"- {info['name']} ({uid}) | лимит: {info['limit']} | остаток: {remaining}")
+    bot.send_message(message.chat.id, "\n".join(lines))
+
+
+@bot.message_handler(commands=["limit"])
+def cmd_limit(message):
+    if not is_admin(message.from_user.id):
+        return
+    parts = message.text.strip().split()
+    if len(parts) < 3 or not parts[1].isdigit() or not parts[2].isdigit():
+        bot.send_message(message.chat.id, "Использование: /limit 123456789 50")
+        return
+    uid = int(parts[1])
+    new_limit = int(parts[2])
+    if uid not in WHITELIST:
+        bot.send_message(message.chat.id, "Пользователь не найден.")
+        return
+    WHITELIST[uid]["limit"] = new_limit
+    name = WHITELIST[uid].get("name", uid)
+    bot.send_message(message.chat.id, f"✅ Лимит для {name} изменён: {new_limit} запросов в день.")
+
+
+@bot.message_handler(commands=["help_admin"])
+def cmd_help_admin(message):
+    if not is_admin(message.from_user.id):
+        return
+    text = (
+        "Шпаргалка администратора:\n\n"
+        "/myid — узнать свой Telegram ID\n"
+        "/add 123456789 Имя 30 — добавить пользователя (лимит необязателен)\n"
+        "/remove 123456789 — удалить пользователя\n"
+        "/users — список всех пользователей с остатком лимита\n"
+        "/limit 123456789 50 — изменить лимит пользователю\n"
+        "/help_admin — эта шпаргалка\n\n"
+        "Пример: /add 987654321 Иванов 30"
+    )
+    bot.send_message(message.chat.id, text)
+
 @bot.message_handler(content_types=["photo"])
 def handle_photo(message):
+    uid = message.from_user.id
+    if not is_allowed(uid):
+        bot.send_message(message.chat.id, "Доступ закрыт. Обратитесь к администратору.")
+        return
+    if not check_limit(uid):
+        bot.send_message(message.chat.id, f"Лимит запросов на сегодня исчерпан. Обновится завтра.")
+        return
+    increment_counter(uid)
+
     wait_msg = bot.send_message(message.chat.id, "Анализирую фото по экологическому блоку...")
 
     try:
@@ -1519,6 +1679,15 @@ def handle_photo(message):
 
 @bot.message_handler(func=lambda message: True)
 def handle_text(message):
+    uid = message.from_user.id
+    if not is_allowed(uid):
+        bot.send_message(message.chat.id, "Доступ закрыт. Обратитесь к администратору.")
+        return
+    if not check_limit(uid):
+        bot.send_message(message.chat.id, f"Лимит запросов на сегодня исчерпан. Обновится завтра.")
+        return
+    increment_counter(uid)
+
     user_text = message.text or ""
     wait_msg = bot.send_message(message.chat.id, "Подбираю нормативные требования...")
 
