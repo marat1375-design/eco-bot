@@ -8,7 +8,8 @@ Telegram-бот для инженера-эколога.
 
 import telebot
 from telebot import util
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 import requests
 import base64
 import os
@@ -31,7 +32,7 @@ if not TELEGRAM_TOKEN:
 if not GOOGLE_API_KEY:
     raise ValueError("Не найден GOOGLE_API_KEY в переменных окружения")
 
-genai.configure(api_key=GOOGLE_API_KEY)
+client = genai.Client(api_key=GOOGLE_API_KEY)
 SELECTED_MODEL = os.environ.get("GEMINI_MODEL", "models/gemini-2.5-flash")
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
@@ -1627,13 +1628,14 @@ def handle_photo(message):
         photo_b64 = base64.b64encode(photo_bytes).decode("utf-8")
         caption = message.caption or ""
 
-        model = genai.GenerativeModel(SELECTED_MODEL)
-
         # Шаг 1: описание фото
-        photo_response = model.generate_content([
-            PHOTO_PROMPT + f"\n\nПодпись пользователя: {caption}",
-            {"mime_type": "image/jpeg", "data": photo_b64}
-        ])
+        photo_response = client.models.generate_content(
+            model=SELECTED_MODEL,
+            contents=[
+                types.Part.from_bytes(data=photo_bytes, mime_type="image/jpeg"),
+                types.Part.from_text(text=PHOTO_PROMPT + f"\n\nПодпись пользователя: {caption}")
+            ]
+        )
         photo_description = clean_answer(photo_response.text)
 
         if "явное экологическое замечание не выявлено" in photo_description.lower() and not caption:
@@ -1664,7 +1666,10 @@ def handle_photo(message):
             + caption
         )
 
-        response = model.generate_content(full_query)
+        response = client.models.generate_content(
+            model=SELECTED_MODEL,
+            contents=full_query
+        )
         answer = clean_answer(response.text)
 
         bot.delete_message(message.chat.id, wait_msg.message_id)
@@ -1712,8 +1717,6 @@ def handle_text(message):
             )
             return
 
-        model = genai.GenerativeModel(SELECTED_MODEL)
-
         full_query = (
             SYSTEM_PROMPT
             + "\n\n=== ФРАГМЕНТЫ ИЗ НОРМАТИВНЫХ ИСТОЧНИКОВ ===\n"
@@ -1722,7 +1725,10 @@ def handle_text(message):
             + user_text
         )
 
-        response = model.generate_content(full_query)
+        response = client.models.generate_content(
+            model=SELECTED_MODEL,
+            contents=full_query
+        )
         answer = clean_answer(response.text)
 
         bot.delete_message(message.chat.id, wait_msg.message_id)
