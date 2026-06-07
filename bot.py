@@ -1619,15 +1619,6 @@ def cmd_help_admin(message):
 
 @bot.message_handler(content_types=["photo"])
 def handle_photo(message):
-    uid = message.from_user.id
-    if not is_allowed(uid):
-        bot.send_message(message.chat.id, "Доступ закрыт. Обратитесь к администратору.")
-        return
-    if not check_limit(uid):
-        bot.send_message(message.chat.id, f"Лимит запросов на сегодня исчерпан. Обновится завтра.")
-        return
-    increment_counter(uid)
-
     wait_msg = bot.send_message(message.chat.id, "Анализирую фото по экологическому блоку...")
 
     try:
@@ -1697,15 +1688,6 @@ def handle_photo(message):
 
 @bot.message_handler(func=lambda message: True)
 def handle_text(message):
-    uid = message.from_user.id
-    if not is_allowed(uid):
-        bot.send_message(message.chat.id, "Доступ закрыт. Обратитесь к администратору.")
-        return
-    if not check_limit(uid):
-        bot.send_message(message.chat.id, f"Лимит запросов на сегодня исчерпан. Обновится завтра.")
-        return
-    increment_counter(uid)
-
     user_text = message.text or ""
     wait_msg = bot.send_message(message.chat.id, "Подбираю нормативные требования...")
 
