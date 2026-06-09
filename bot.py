@@ -32,7 +32,7 @@ if not ANTHROPIC_KEY:
     raise ValueError("Не найден ANTHROPIC_KEY в переменных окружения")
 
 claude = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
-CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-20250514")
+CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-5")
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
 # ─────────────────────────────────────────────
