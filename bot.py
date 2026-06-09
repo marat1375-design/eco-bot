@@ -17,6 +17,9 @@ import re
 import urllib.parse
 import urllib3
 from bs4 import BeautifulSoup
+from PIL import Image
+import pillow_heif
+from io import BytesIO
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -35,6 +38,23 @@ if not GOOGLE_API_KEY:
 client = genai.Client(api_key=GOOGLE_API_KEY)
 SELECTED_MODEL = os.environ.get("GEMINI_MODEL", "models/gemini-2.5-flash")
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
+
+# ─────────────────────────────────────────────
+# КОНВЕРТАЦИЯ HEIC
+# ─────────────────────────────────────────────
+
+pillow_heif.register_heif_opener()
+
+def convert_to_jpeg(photo_bytes: bytes) -> bytes:
+    """Конвертирует фото в JPEG если нужно (поддержка HEIC с iPhone)."""
+    try:
+        img = Image.open(BytesIO(photo_bytes))
+        output = BytesIO()
+        img.convert("RGB").save(output, format="JPEG", quality=90)
+        return output.getvalue()
+    except Exception:
+        return photo_bytes
+
 
 # ─────────────────────────────────────────────
 # RETRY ЛОГИКА
@@ -1654,6 +1674,7 @@ def handle_photo(message):
         )
 
         photo_bytes = requests.get(file_url, timeout=30).content
+        photo_bytes = convert_to_jpeg(photo_bytes)
         photo_b64 = base64.b64encode(photo_bytes).decode("utf-8")
         caption = message.caption or ""
 
