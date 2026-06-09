@@ -1,20 +1,20 @@
 """
-Эко Помощник ПККР 1.1
+Эко Помощник ПККР 1.2
 Telegram-бот для инженера-эколога.
 Источник: Экологический кодекс РК (N 400-VI).
+Движок: Claude API (Anthropic).
 Контекст: локальная база статей - основной источник.
 Резерв: парсинг adilet.zan.kz - подключается если локальных статей < 3.
 """
 
 import telebot
 from telebot import util
-from google import genai
-from google.genai import types
+import anthropic
 import requests
 import base64
 import os
 import re
-import urllib.parse
+import time
 import urllib3
 from bs4 import BeautifulSoup
 from PIL import Image
@@ -28,25 +28,22 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 # ─────────────────────────────────────────────
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
+ANTHROPIC_KEY = os.environ.get("ANTHROPIC_KEY")
 
 if not TELEGRAM_TOKEN:
     raise ValueError("Не найден TELEGRAM_TOKEN в переменных окружения")
-if not GOOGLE_API_KEY:
-    raise ValueError("Не найден GOOGLE_API_KEY в переменных окружения")
+if not ANTHROPIC_KEY:
+    raise ValueError("Не найден ANTHROPIC_KEY в переменных окружения")
 
-client = genai.Client(api_key=GOOGLE_API_KEY)
-SELECTED_MODEL = os.environ.get("GEMINI_MODEL", "models/gemini-2.5-flash")
-bot = telebot.TeleBot(TELEGRAM_TOKEN)
+claude = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
+CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-5")
 
-# ─────────────────────────────────────────────
-# КОНВЕРТАЦИЯ HEIC
-# ─────────────────────────────────────────────
-
+# Регистрируем HEIC
 pillow_heif.register_heif_opener()
 
+
 def convert_to_jpeg(photo_bytes: bytes) -> bytes:
-    """Конвертирует фото в JPEG если нужно (поддержка HEIC с iPhone)."""
+    """Конвертирует фото в JPEG (поддержка HEIC с iPhone)."""
     try:
         img = Image.open(BytesIO(photo_bytes))
         output = BytesIO()
@@ -55,12 +52,6 @@ def convert_to_jpeg(photo_bytes: bytes) -> bytes:
     except Exception:
         return photo_bytes
 
-
-# ─────────────────────────────────────────────
-# RETRY ЛОГИКА
-# ─────────────────────────────────────────────
-
-import time
 
 def claude_generate(messages, max_tokens=4000, retries=3, delay=5):
     """Вызов Claude с автоматическим повтором при ошибке."""
@@ -73,13 +64,12 @@ def claude_generate(messages, max_tokens=4000, retries=3, delay=5):
             )
             return response.content[0].text
         except Exception as e:
-            err = str(e)
             if attempt < retries - 1:
-                print(f"[retry] Попытка {attempt + 1} не удалась: {err}. Жду {delay} сек...")
+                print(f"[retry] Попытка {attempt + 1} не удалась: {e}. Жду {delay} сек...")
                 time.sleep(delay)
             else:
                 raise
-
+bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
 # ─────────────────────────────────────────────
 # СИСТЕМА ДОСТУПА
@@ -1559,7 +1549,7 @@ def send_long_message(chat_id, text: str):
 def send_welcome(message):
     bot.send_message(
         message.chat.id,
-        "Эко Помощник ПККР 1.1\n\n"
+        "Эко Помощник ПККР 1.2\n\n"
         "Пришли фото или опиши экологическое замечание.\n\n"
         "Источник: Экологический кодекс РК N 400-VI.\n\n"
         "Примеры:\n"
@@ -1679,14 +1669,13 @@ def handle_photo(message):
         caption = message.caption or ""
 
         # Шаг 1: описание фото
-        photo_response = client.models.generate_content(
-            model=SELECTED_MODEL,
-            contents=[
-                types.Part.from_bytes(data=photo_bytes, mime_type="image/jpeg"),
-                types.Part.from_text(text=PHOTO_PROMPT + f"\n\nПодпись пользователя: {caption}")
-            ]
-        )
-        photo_description = clean_answer(photo_response.text)
+        photo_description = clean_answer(claude_generate(
+            messages=[{"role": "user", "content": [
+                {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": photo_b64}},
+                {"type": "text", "text": PHOTO_PROMPT + f"\n\nПодпись пользователя: {caption}"}
+            ]}],
+            max_tokens=1000
+        ))
 
         if "явное экологическое замечание не выявлено" in photo_description.lower() and not caption:
             bot.delete_message(message.chat.id, wait_msg.message_id)
@@ -1716,11 +1705,9 @@ def handle_photo(message):
             + caption
         )
 
-        response = client.models.generate_content(
-            model=SELECTED_MODEL,
-            contents=full_query
-        )
-        answer = clean_answer(response.text)
+        answer = clean_answer(claude_generate(
+            messages=[{"role": "user", "content": full_query}]
+        ))
 
         bot.delete_message(message.chat.id, wait_msg.message_id)
         send_long_message(message.chat.id, answer)
@@ -1766,11 +1753,9 @@ def handle_text(message):
             + user_text
         )
 
-        response = client.models.generate_content(
-            model=SELECTED_MODEL,
-            contents=full_query
-        )
-        answer = clean_answer(response.text)
+        answer = clean_answer(claude_generate(
+            messages=[{"role": "user", "content": full_query}]
+        ))
 
         bot.delete_message(message.chat.id, wait_msg.message_id)
         send_long_message(message.chat.id, answer)
@@ -1782,5 +1767,5 @@ def handle_text(message):
             bot.send_message(message.chat.id, "Ошибка: " + str(error))
 
 
-print("БОТ ЗАПУЩЕН — Эко Помощник ПККР 1.1")
+print("БОТ ЗАПУЩЕН — Эко Помощник ПККР 1.2")
 bot.polling(none_stop=True, interval=1)
