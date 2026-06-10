@@ -54,15 +54,14 @@ def convert_to_jpeg(photo_bytes: bytes) -> bytes:
         return photo_bytes
 
 
-def claude_generate(messages, max_tokens=4000, retries=3, delay=5):
+def claude_generate(messages, max_tokens=4000, retries=3, delay=5, system=None):
     """Вызов Claude с автоматическим повтором при ошибке."""
     for attempt in range(retries):
         try:
-            response = claude.messages.create(
-                model=CLAUDE_MODEL,
-                max_tokens=max_tokens,
-                messages=messages
-            )
+            kwargs = dict(model=CLAUDE_MODEL, max_tokens=max_tokens, messages=messages)
+            if system:
+                kwargs["system"] = system
+            response = claude.messages.create(**kwargs)
             return response.content[0].text
         except Exception as e:
             if attempt < retries - 1:
@@ -1471,6 +1470,13 @@ ECO_KEYWORDS = [
 
 NON_ECO_KEYWORDS: list = []  # зарезервировано, не используется
 
+# Нормализуем ё→е во всех тегах и ключевых словах один раз при загрузке
+for _a in ARTICLES:
+    _a["tags"] = [t.replace("ё", "е") for t in _a["tags"]]
+for _topic in TOPIC_GROUPS:
+    TOPIC_GROUPS[_topic] = [kw.replace("ё", "е") for kw in TOPIC_GROUPS[_topic]]
+ECO_KEYWORDS = [kw.replace("ё", "е") for kw in ECO_KEYWORDS]
+
 # ─────────────────────────────────────────────
 # СИСТЕМНЫЕ ПРОМПТЫ
 # ─────────────────────────────────────────────
@@ -1581,7 +1587,7 @@ PHOTO_PROMPT = """Ты — помощник инженера-эколога не
 
 def detect_topics(text: str) -> set:
     """Определяет активные темы по тексту запроса."""
-    text_lower = text.lower()
+    text_lower = text.lower().replace("ё", "е")
     active = set()
     for topic, keywords in TOPIC_GROUPS.items():
         if any(kw in text_lower for kw in keywords):
@@ -1591,7 +1597,7 @@ def detect_topics(text: str) -> set:
 
 def select_articles(query: str) -> list:
     """Отбирает релевантные статьи из локальной базы по тексту запроса."""
-    text_lower = query.lower()
+    text_lower = query.lower().replace("ё", "е")
     selected = []
     seen_numbers_laws = set()
 
@@ -1718,7 +1724,7 @@ def build_context(query: str) -> str:
 
 
 def is_ecology_query(text: str) -> bool:
-    text_lower = text.lower()
+    text_lower = text.lower().replace("ё", "е")
     if any(kw in text_lower for kw in NON_ECO_KEYWORDS):
         return False
     return any(kw in text_lower for kw in ECO_KEYWORDS)
@@ -1884,8 +1890,7 @@ def handle_photo(message):
         )
 
         text_part = (
-            SYSTEM_PROMPT
-            + "\n\n" + context_block
+            context_block
             + "\n\n=== ПОДПИСЬ ПОЛЬЗОВАТЕЛЯ ===\n"
             + (caption if caption else "(подпись не указана)")
         )
@@ -1894,7 +1899,8 @@ def handle_photo(message):
             messages=[{"role": "user", "content": [
                 {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": photo_b64}},
                 {"type": "text", "text": text_part},
-            ]}]
+            ]}],
+            system=SYSTEM_PROMPT,
         ))
 
         bot.delete_message(message.chat.id, wait_msg.message_id)
@@ -1942,15 +1948,15 @@ def handle_text(message):
             return
 
         full_query = (
-            SYSTEM_PROMPT
-            + "\n\n=== ФРАГМЕНТЫ ИЗ НОРМАТИВНЫХ ИСТОЧНИКОВ ===\n"
+            "=== ФРАГМЕНТЫ ИЗ НОРМАТИВНЫХ ИСТОЧНИКОВ ===\n"
             + context
             + "\n\n=== ЗАПРОС ПОЛЬЗОВАТЕЛЯ ===\n"
             + user_text
         )
 
         answer = clean_answer(claude_generate(
-            messages=[{"role": "user", "content": full_query}]
+            messages=[{"role": "user", "content": full_query}],
+            system=SYSTEM_PROMPT,
         ))
 
         bot.delete_message(message.chat.id, wait_msg.message_id)
