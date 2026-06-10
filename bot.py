@@ -83,6 +83,7 @@ ADMIN_ID = 1011055992  # Марат
 DEFAULT_DAILY_LIMIT = 30
 
 WHITELIST_FILE = "whitelist.json"
+COUNTERS_FILE  = "counters.json"
 
 # Белый список: { user_id: { "name": "Имя", "limit": 30 } }
 WHITELIST: dict = {}
@@ -113,7 +114,30 @@ def save_whitelist():
         print(f"[whitelist] Ошибка сохранения: {e}")
 
 
+def load_counters():
+    """Загружает счётчики из файла при старте."""
+    global DAILY_COUNTERS
+    if os.path.exists(COUNTERS_FILE):
+        try:
+            with open(COUNTERS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            DAILY_COUNTERS = {int(k): v for k, v in data.items()}
+            print(f"[counters] Загружено {len(DAILY_COUNTERS)} записей")
+        except Exception as e:
+            print(f"[counters] Ошибка загрузки: {e}")
+
+
+def save_counters():
+    """Сохраняет счётчики в файл."""
+    try:
+        with open(COUNTERS_FILE, "w", encoding="utf-8") as f:
+            json.dump({str(k): v for k, v in DAILY_COUNTERS.items()}, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[counters] Ошибка сохранения: {e}")
+
+
 load_whitelist()
+load_counters()
 
 
 def is_admin(user_id: int) -> bool:
@@ -149,6 +173,7 @@ def increment_counter(user_id: int):
         counter = {"date": today, "count": 0}
     counter["count"] += 1
     DAILY_COUNTERS[user_id] = counter
+    save_counters()
 
 
 def get_remaining(user_id: int) -> int:
