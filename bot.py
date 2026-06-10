@@ -81,6 +81,7 @@ def claude_generate(messages, max_tokens=4000, retries=3, delay=5, system=None):
             else:
                 raise
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
+BOT_START_TIME = time.time()
 
 # ─────────────────────────────────────────────
 # СИСТЕМА ДОСТУПА
@@ -149,6 +150,28 @@ def save_counters():
 
 load_whitelist()
 load_counters()
+
+# ─────────────────────────────────────────────
+# ИСТОРИЯ ДИАЛОГА (в памяти, не персистентна)
+# ─────────────────────────────────────────────
+
+MAX_HISTORY = 6  # максимум сообщений на пользователя (3 пары user/assistant)
+USER_HISTORY: dict = {}
+
+
+def get_history(user_id: int) -> list:
+    return list(USER_HISTORY.get(user_id, []))
+
+
+def add_to_history(user_id: int, role: str, content: str):
+    history = USER_HISTORY.setdefault(user_id, [])
+    history.append({"role": role, "content": content})
+    if len(history) > MAX_HISTORY:
+        USER_HISTORY[user_id] = history[-MAX_HISTORY:]
+
+
+def clear_history(user_id: int):
+    USER_HISTORY.pop(user_id, None)
 
 
 def is_admin(user_id: int) -> bool:
@@ -1799,6 +1822,7 @@ def cmd_start(message):
             "Доступ закрыт. Обратитесь к администратору для получения доступа."
         )
         return
+    clear_history(uid)
     bot.send_message(
         message.chat.id,
         "Эко Помощник ПККР — помощник инженера-эколога.\n\n"
@@ -1808,7 +1832,49 @@ def cmd_start(message):
         "— Анализировать фотографии объектов с экологической точки зрения\n\n"
         "Как использовать:\n"
         "Напишите описание нарушения или отправьте фото объекта (можно с подписью).\n\n"
+        "/quota — остаток запросов на сегодня\n"
+        "/reset — начать новый диалог\n\n"
         f"Осталось запросов сегодня: {get_remaining(uid)}"
+    )
+
+
+@bot.message_handler(commands=["quota"])
+def cmd_quota(message):
+    uid = message.from_user.id
+    if not is_allowed(uid):
+        bot.send_message(message.chat.id, "Доступ закрыт.")
+        return
+    remaining = get_remaining(uid)
+    bot.send_message(message.chat.id, f"Осталось запросов сегодня: {remaining}")
+
+
+@bot.message_handler(commands=["reset"])
+def cmd_reset(message):
+    uid = message.from_user.id
+    if not is_allowed(uid):
+        return
+    clear_history(uid)
+    bot.send_message(message.chat.id, "История диалога очищена. Начнём с чистого листа.")
+
+
+@bot.message_handler(commands=["status"])
+def cmd_status(message):
+    if not is_admin(message.from_user.id):
+        return
+    today = str(date.today())
+    total_today = sum(
+        c["count"] for c in DAILY_COUNTERS.values()
+        if c.get("date") == today
+    )
+    uptime_sec = int(time.time() - BOT_START_TIME)
+    hours, remainder = divmod(uptime_sec, 3600)
+    minutes = remainder // 60
+    bot.send_message(
+        message.chat.id,
+        f"Статус бота:\n"
+        f"Пользователей: {len(WHITELIST)}\n"
+        f"Запросов сегодня: {total_today}\n"
+        f"Аптайм: {hours}ч {minutes}мин"
     )
 
 
@@ -1895,6 +1961,7 @@ def cmd_help_admin(message):
         "/remove 123456789 — удалить пользователя\n"
         "/users — список всех пользователей с остатком лимита\n"
         "/limit 123456789 50 — изменить лимит пользователю\n"
+        "/status — статистика: пользователи, запросы за день, аптайм\n"
         "/help_admin — эта шпаргалка\n\n"
         "Пример: /add 987654321 Иванов 30"
     )
@@ -1934,8 +2001,9 @@ def handle_photo(message):
             + (caption if caption else "(подпись не указана)")
         )
 
+        history = get_history(uid)
         answer = clean_answer(claude_generate(
-            messages=[{"role": "user", "content": [
+            messages=history + [{"role": "user", "content": [
                 {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": photo_b64}},
                 {"type": "text", "text": text_part},
             ]}],
@@ -1943,6 +2011,8 @@ def handle_photo(message):
         ))
 
         increment_counter(uid)
+        add_to_history(uid, "user", f"[фото: {caption or 'без подписи'}]")
+        add_to_history(uid, "assistant", answer)
         bot.delete_message(message.chat.id, wait_msg.message_id)
         send_long_message(message.chat.id, answer)
 
@@ -1995,12 +2065,15 @@ def handle_text(message):
             + user_text
         )
 
+        history = get_history(uid)
         answer = clean_answer(claude_generate(
-            messages=[{"role": "user", "content": full_query}],
+            messages=history + [{"role": "user", "content": full_query}],
             system=SYSTEM_PROMPT,
         ))
 
         increment_counter(uid)
+        add_to_history(uid, "user", user_text)
+        add_to_history(uid, "assistant", answer)
         bot.delete_message(message.chat.id, wait_msg.message_id)
         send_long_message(message.chat.id, answer)
 
