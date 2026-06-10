@@ -17,6 +17,7 @@ import re
 import time
 import json
 import urllib3
+from datetime import date
 from bs4 import BeautifulSoup
 from PIL import Image
 import pillow_heif
@@ -46,12 +47,19 @@ CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
 pillow_heif.register_heif_opener()
 
 
+MAX_IMAGE_SIZE = 1280
+
 def convert_to_jpeg(photo_bytes: bytes) -> bytes:
-    """Конвертирует фото в JPEG (поддержка HEIC с iPhone)."""
+    """Конвертирует фото в JPEG с ресайзом до MAX_IMAGE_SIZE px по длинной стороне."""
     try:
         img = Image.open(BytesIO(photo_bytes))
+        img = img.convert("RGB")
+        w, h = img.size
+        if max(w, h) > MAX_IMAGE_SIZE:
+            scale = MAX_IMAGE_SIZE / max(w, h)
+            img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
         output = BytesIO()
-        img.convert("RGB").save(output, format="JPEG", quality=90)
+        img.save(output, format="JPEG", quality=85)
         return output.getvalue()
     except Exception:
         return photo_bytes
@@ -159,7 +167,6 @@ def check_limit(user_id: int) -> bool:
         return True
     if user_id not in WHITELIST:
         return False
-    from datetime import date
     today = str(date.today())
     counter = DAILY_COUNTERS.get(user_id, {"date": today, "count": 0})
     if counter["date"] != today:
@@ -169,7 +176,6 @@ def check_limit(user_id: int) -> bool:
 
 
 def increment_counter(user_id: int):
-    from datetime import date
     today = str(date.today())
     counter = DAILY_COUNTERS.get(user_id, {"date": today, "count": 0})
     if counter["date"] != today:
@@ -182,7 +188,6 @@ def increment_counter(user_id: int):
 def get_remaining(user_id: int) -> int:
     if is_admin(user_id):
         return 9999
-    from datetime import date
     today = str(date.today())
     counter = DAILY_COUNTERS.get(user_id, {"date": today, "count": 0})
     if counter["date"] != today:
@@ -1594,21 +1599,6 @@ SYSTEM_PROMPT = """Ты — Эко Помощник ПККР, ассистент
 ВАЖНО: Помимо административного штрафа виновное лицо обязано возместить экологический ущерб в полном объёме (статья 17 Экологического кодекса РК, принцип "загрязнитель платит"). При подтверждении загрязнения лабораторным анализом ущерб рассчитывается по методике, утверждённой уполномоченным органом в области охраны окружающей среды. Суммы возмещения ущерба, как правило, многократно превышают размер административного штрафа.]
 """
 
-PHOTO_PROMPT = """Ты — помощник инженера-эколога нефтегазового предприятия в Казахстане.
-Проанализируй фото исключительно с экологической точки зрения.
-
-Если пользователь указал подпись (название объекта или замечание) — используй её как главный контекст анализа.
-Примеры: "Полигон ТБО" → анализируй как полигон; "порыв нефтепровода" → анализируй как аварийный разлив; "биопруды" → анализируй как объект сточных вод; "ДНС" → анализируй как дожимная насосная станция; "шламовый амбар" → анализируй как объект хранения буровых отходов.
-
-Объекты ПККР: кустовые площадки, скважины, УПСВ, БКНС, КНС, КОС, биопруды, РВС, ЦУГ, ЦДНГ, ЦППН, ПСН, ДНС, нефтяные ловушки, ГПЭС, ГТЭС, факельная установка, шламовые амбары, склады ГСМ, вахтовый посёлок, полигон ТБО, нефтепроводы, водоводы, коллекторы.
-
-Описывай только то, что видишь с экологической точки зрения: загрязнение территории, пятна нефти или масла, отходы, мусор, контейнеры, отсутствие раздельного сбора, разлив жидкости, шлам, сточные воды, дым, пыль.
-
-Не используй Markdown-разметку, звёздочки, таблицы. Пиши обычным текстом кратко — 2-4 предложения.
-Если экологическое замечание не видно — напиши:
-По фото явное экологическое замечание не выявлено.
-"""
-
 # ─────────────────────────────────────────────
 # ЛОГИКА ПОДБОРА СТАТЕЙ
 # ─────────────────────────────────────────────
@@ -1800,6 +1790,28 @@ def send_welcome(message):
 
 
 
+@bot.message_handler(commands=["start"])
+def cmd_start(message):
+    uid = message.from_user.id
+    if not is_allowed(uid):
+        bot.send_message(
+            message.chat.id,
+            "Доступ закрыт. Обратитесь к администратору для получения доступа."
+        )
+        return
+    bot.send_message(
+        message.chat.id,
+        "Эко Помощник ПККР — помощник инженера-эколога.\n\n"
+        "Что умею:\n"
+        "— Анализировать экологические замечания по Экологическому кодексу РК\n"
+        "— Подбирать нормативные требования и статьи КоАП\n"
+        "— Анализировать фотографии объектов с экологической точки зрения\n\n"
+        "Как использовать:\n"
+        "Напишите описание нарушения или отправьте фото объекта (можно с подписью).\n\n"
+        f"Осталось запросов сегодня: {get_remaining(uid)}"
+    )
+
+
 @bot.message_handler(commands=["myid"])
 def cmd_myid(message):
     bot.send_message(message.chat.id, f"Ваш Telegram ID: {message.from_user.id}")
@@ -1897,7 +1909,6 @@ def handle_photo(message):
     if not check_limit(uid):
         bot.send_message(message.chat.id, "Лимит запросов на сегодня исчерпан.")
         return
-    increment_counter(uid)
     wait_msg = bot.send_message(message.chat.id, "Анализирую фото по экологическому блоку...")
 
     try:
@@ -1931,6 +1942,7 @@ def handle_photo(message):
             system=SYSTEM_PROMPT,
         ))
 
+        increment_counter(uid)
         bot.delete_message(message.chat.id, wait_msg.message_id)
         send_long_message(message.chat.id, answer)
 
@@ -1952,7 +1964,6 @@ def handle_text(message):
     if not check_limit(uid):
         bot.send_message(message.chat.id, "Лимит запросов на сегодня исчерпан.")
         return
-    increment_counter(uid)
     user_text = message.text or ""
     wait_msg = bot.send_message(message.chat.id, "Подбираю нормативные требования...")
 
@@ -1989,6 +2000,7 @@ def handle_text(message):
             system=SYSTEM_PROMPT,
         ))
 
+        increment_counter(uid)
         bot.delete_message(message.chat.id, wait_msg.message_id)
         send_long_message(message.chat.id, answer)
 
