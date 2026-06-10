@@ -1932,10 +1932,12 @@ def handle_photo(message):
         send_long_message(message.chat.id, answer)
 
     except Exception as error:
+        print(f"[error] {type(error).__name__}: {error}")
+        user_msg = "Произошла ошибка при обработке запроса. Попробуйте повторить через несколько секунд."
         try:
-            bot.edit_message_text("Ошибка: " + str(error), message.chat.id, wait_msg.message_id)
+            bot.edit_message_text(user_msg, message.chat.id, wait_msg.message_id)
         except Exception:
-            bot.send_message(message.chat.id, "Ошибка: " + str(error))
+            bot.send_message(message.chat.id, user_msg)
 
 
 @bot.message_handler(func=lambda message: True)
@@ -1988,10 +1990,12 @@ def handle_text(message):
         send_long_message(message.chat.id, answer)
 
     except Exception as error:
+        print(f"[error] {type(error).__name__}: {error}")
+        user_msg = "Произошла ошибка при обработке запроса. Попробуйте повторить через несколько секунд."
         try:
-            bot.edit_message_text("Ошибка: " + str(error), message.chat.id, wait_msg.message_id)
+            bot.edit_message_text(user_msg, message.chat.id, wait_msg.message_id)
         except Exception:
-            bot.send_message(message.chat.id, "Ошибка: " + str(error))
+            bot.send_message(message.chat.id, user_msg)
 
 
 print("БОТ ЗАПУЩЕН — Эко Помощник ПККР 1.2")
