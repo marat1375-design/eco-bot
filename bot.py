@@ -15,6 +15,7 @@ import base64
 import os
 import re
 import time
+import json
 import urllib3
 from bs4 import BeautifulSoup
 from PIL import Image
@@ -36,7 +37,7 @@ if not ANTHROPIC_KEY:
     raise ValueError("Не найден ANTHROPIC_KEY в переменных окружения")
 
 claude = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
-CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-5")
+CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
 
 # Регистрируем HEIC
 pillow_heif.register_heif_opener()
@@ -82,11 +83,38 @@ ADMIN_ID = 1011055992  # Марат
 # Лимит запросов в день по умолчанию
 DEFAULT_DAILY_LIMIT = 30
 
+WHITELIST_FILE = "whitelist.json"
+
 # Белый список: { user_id: { "name": "Имя", "limit": 30 } }
 WHITELIST: dict = {}
 
 # Счётчики запросов за день: { user_id: { "date": "2026-05-17", "count": 5 } }
 DAILY_COUNTERS: dict = {}
+
+
+def load_whitelist():
+    """Загружает вайтлист из файла при старте."""
+    global WHITELIST
+    if os.path.exists(WHITELIST_FILE):
+        try:
+            with open(WHITELIST_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            WHITELIST = {int(k): v for k, v in data.items()}
+            print(f"[whitelist] Загружено {len(WHITELIST)} пользователей")
+        except Exception as e:
+            print(f"[whitelist] Ошибка загрузки: {e}")
+
+
+def save_whitelist():
+    """Сохраняет вайтлист в файл."""
+    try:
+        with open(WHITELIST_FILE, "w", encoding="utf-8") as f:
+            json.dump({str(k): v for k, v in WHITELIST.items()}, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[whitelist] Ошибка сохранения: {e}")
+
+
+load_whitelist()
 
 
 def is_admin(user_id: int) -> bool:
@@ -1755,6 +1783,7 @@ def cmd_add(message):
     name = parts[2] if len(parts) > 2 else f"user_{uid}"
     limit = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else DEFAULT_DAILY_LIMIT
     WHITELIST[uid] = {"name": name, "limit": limit}
+    save_whitelist()
     bot.send_message(message.chat.id, f"✅ Пользователь {name} ({uid}) добавлен. Лимит: {limit} запросов в день.")
 
 
@@ -1770,6 +1799,7 @@ def cmd_remove(message):
     if uid in WHITELIST:
         name = WHITELIST[uid].get("name", uid)
         del WHITELIST[uid]
+        save_whitelist()
         bot.send_message(message.chat.id, f"❌ Пользователь {name} ({uid}) удалён.")
     else:
         bot.send_message(message.chat.id, "Пользователь не найден.")
@@ -1803,6 +1833,7 @@ def cmd_limit(message):
         bot.send_message(message.chat.id, "Пользователь не найден.")
         return
     WHITELIST[uid]["limit"] = new_limit
+    save_whitelist()
     name = WHITELIST[uid].get("name", uid)
     bot.send_message(message.chat.id, f"✅ Лимит для {name} изменён: {new_limit} запросов в день.")
 
@@ -1825,6 +1856,14 @@ def cmd_help_admin(message):
 
 @bot.message_handler(content_types=["photo"])
 def handle_photo(message):
+    uid = message.from_user.id
+    if not is_allowed(uid):
+        bot.send_message(message.chat.id, "Доступ закрыт. Обратитесь к администратору.")
+        return
+    if not check_limit(uid):
+        bot.send_message(message.chat.id, "Лимит запросов на сегодня исчерпан.")
+        return
+    increment_counter(uid)
     wait_msg = bot.send_message(message.chat.id, "Анализирую фото по экологическому блоку...")
 
     try:
@@ -1892,6 +1931,14 @@ def handle_photo(message):
 
 @bot.message_handler(func=lambda message: True)
 def handle_text(message):
+    uid = message.from_user.id
+    if not is_allowed(uid):
+        bot.send_message(message.chat.id, "Доступ закрыт. Обратитесь к администратору.")
+        return
+    if not check_limit(uid):
+        bot.send_message(message.chat.id, "Лимит запросов на сегодня исчерпан.")
+        return
+    increment_counter(uid)
     user_text = message.text or ""
     wait_msg = bot.send_message(message.chat.id, "Подбираю нормативные требования...")
 
@@ -1939,4 +1986,4 @@ def handle_text(message):
 
 
 print("БОТ ЗАПУЩЕН — Эко Помощник ПККР 1.2")
-bot.polling(none_stop=True, interval=1)
+bot.polling(none_stop=True, interval=1, timeout=60, long_polling_timeout=60)
