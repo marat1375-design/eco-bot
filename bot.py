@@ -1869,54 +1869,32 @@ def handle_photo(message):
     try:
         file_id = message.photo[-1].file_id
         file_info = bot.get_file(file_id)
-        file_url = (
-            f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{file_info.file_path}"
-        )
+        file_url = f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{file_info.file_path}"
 
         photo_bytes = requests.get(file_url, timeout=30).content
         photo_bytes = convert_to_jpeg(photo_bytes)
         photo_b64 = base64.b64encode(photo_bytes).decode("utf-8")
         caption = message.caption or ""
 
-        # Шаг 1: описание фото
-        photo_description = clean_answer(claude_generate(
-            messages=[{"role": "user", "content": [
-                {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": photo_b64}},
-                {"type": "text", "text": PHOTO_PROMPT + f"\n\nПодпись пользователя: {caption}"}
-            ]}],
-            max_tokens=1000
-        ))
+        context = build_context(caption) if caption else ""
+        context_block = (
+            "=== ФРАГМЕНТЫ ИЗ НОРМАТИВНЫХ ИСТОЧНИКОВ ===\n" + context
+            if context
+            else "=== НОРМАТИВНЫЕ ИСТОЧНИКИ ===\nСтатьи не предподобраны — опирайся на системные инструкции."
+        )
 
-        if "явное экологическое замечание не выявлено" in photo_description.lower() and not caption:
-            bot.delete_message(message.chat.id, wait_msg.message_id)
-            bot.send_message(message.chat.id, photo_description)
-            return
-
-        # Шаг 2: анализ по локальному контексту
-        query = photo_description + " " + caption
-        context = build_context(query)
-
-        if not context:
-            bot.delete_message(message.chat.id, wait_msg.message_id)
-            bot.send_message(
-                message.chat.id,
-                "По фото экологическое замечание не определено, "
-                "либо тема не относится к экологическому блоку текущей версии."
-            )
-            return
-
-        full_query = (
+        text_part = (
             SYSTEM_PROMPT
-            + "\n\n=== ФРАГМЕНТЫ ИЗ НОРМАТИВНЫХ ИСТОЧНИКОВ ===\n"
-            + context
-            + "\n\n=== ОПИСАНИЕ ФОТО ===\n"
-            + photo_description
+            + "\n\n" + context_block
             + "\n\n=== ПОДПИСЬ ПОЛЬЗОВАТЕЛЯ ===\n"
-            + caption
+            + (caption if caption else "(подпись не указана)")
         )
 
         answer = clean_answer(claude_generate(
-            messages=[{"role": "user", "content": full_query}]
+            messages=[{"role": "user", "content": [
+                {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": photo_b64}},
+                {"type": "text", "text": text_part},
+            ]}]
         ))
 
         bot.delete_message(message.chat.id, wait_msg.message_id)
