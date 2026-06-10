@@ -36,7 +36,10 @@ if not TELEGRAM_TOKEN:
 if not ANTHROPIC_KEY:
     raise ValueError("Не найден ANTHROPIC_KEY в переменных окружения")
 
-claude = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
+claude = anthropic.Anthropic(
+    api_key=ANTHROPIC_KEY,
+    default_headers={"anthropic-beta": "prompt-caching-2024-07-31"},
+)
 CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
 
 # Регистрируем HEIC
@@ -60,7 +63,7 @@ def claude_generate(messages, max_tokens=4000, retries=3, delay=5, system=None):
         try:
             kwargs = dict(model=CLAUDE_MODEL, max_tokens=max_tokens, messages=messages)
             if system:
-                kwargs["system"] = system
+                kwargs["system"] = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
             response = claude.messages.create(**kwargs)
             return response.content[0].text
         except Exception as e:
