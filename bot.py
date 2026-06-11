@@ -1863,10 +1863,55 @@ def _fetch_fallback(law_key: str, query: str, limit: int = 4) -> str:
 
 
 # ─────────────────────────────────────────────
+# API БАЗЫ ЗАКОНОВ
+# ─────────────────────────────────────────────
+
+LAW_API_URL = "https://law-app-0hdy.onrender.com/api/search"
+LAW_API_LIMIT = 8
+
+
+def search_laws_api(query: str, limit: int = LAW_API_LIMIT) -> str:
+    """Ищет статьи в реальной базе законов через API. Возвращает форматированный текст."""
+    if not query or not query.strip():
+        return ""
+    try:
+        resp = requests.get(
+            LAW_API_URL,
+            params={"q": query.strip(), "limit": limit},
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            print(f"[law-api] HTTP {resp.status_code}")
+            return ""
+        items = resp.json().get("items", [])
+        if not items:
+            return ""
+        parts = []
+        for item in items:
+            law = item.get("law_name", "").strip()
+            article = item.get("article_num", "").strip()
+            text = item.get("text_content", "").strip()
+            if law and article and text:
+                parts.append(f"{law}\n{article}\n{text}")
+        print(f"[law-api] Найдено {len(parts)} статей для: {query[:60]}")
+        return "\n\n".join(parts)
+    except Exception as e:
+        print(f"[law-api] Ошибка: {e}")
+        return ""
+
+
+# ─────────────────────────────────────────────
 # ОСНОВНАЯ ФУНКЦИЯ ФОРМИРОВАНИЯ КОНТЕКСТА
 # ─────────────────────────────────────────────
 
 def build_context(query: str) -> str:
+    # Сначала ищем в реальной базе законов через API
+    api_context = search_laws_api(query)
+    if api_context:
+        return api_context
+
+    # Фолбэк: локальная база статей
+    print("[law-api] Нет результатов от API — фолбэк на локальную базу")
     articles = select_articles(query)
     ecocode_parts = []
 
@@ -1884,7 +1929,7 @@ def build_context(query: str) -> str:
         return ""
 
     return (
-        "=== Экологический кодекс РК от 02.01.2021 N 400-VI ===\n\n"
+        "Экологический кодекс РК от 02.01.2021 N 400-VI\n\n"
         + "\n\n".join(ecocode_parts)
     )
 
@@ -2115,9 +2160,9 @@ def handle_photo(message):
 
         context = build_context(caption) if caption else ""
         context_block = (
-            "=== ФРАГМЕНТЫ ИЗ НОРМАТИВНЫХ ИСТОЧНИКОВ (ЭКОЛОГИЯ) ===\n" + context
+            "=== ФРАГМЕНТЫ ИЗ НОРМАТИВНЫХ ИСТОЧНИКОВ ===\n" + context
             if context
-            else "=== НОРМАТИВНЫЕ ИСТОЧНИКИ (ЭКОЛОГИЯ) ===\nСтатьи не предподобраны — опирайся на нормативную базу системного промпта."
+            else "=== НОРМАТИВНЫЕ ИСТОЧНИКИ ===\nСтатьи не найдены — опирайся на нормативную базу системного промпта."
         )
 
         text_part = (
