@@ -2137,6 +2137,13 @@ def cmd_help_admin(message):
     )
     bot.send_message(message.chat.id, text)
 
+DESCRIBE_PROMPT = """Ты — технический наблюдатель на промышленном объекте.
+Посмотри на фото и перечисли ТОЛЬКО то, что видно: тип объекта или оборудования,
+наличие загрязнений или разливов, состояние территории, экипировка людей (или её отсутствие),
+пожароопасные материалы, нарушения порядка. Пиши сухо, техническими терминами, 1-3 предложения.
+Никаких оценок и выводов — только наблюдение."""
+
+
 @bot.message_handler(content_types=["photo"])
 def handle_photo(message):
     uid = message.from_user.id
@@ -2146,7 +2153,7 @@ def handle_photo(message):
     if not check_limit(uid):
         bot.send_message(message.chat.id, "Лимит запросов на сегодня исчерпан.")
         return
-    wait_msg = bot.send_message(message.chat.id, "Комплексный анализ фото: экология, охрана труда, пожарная безопасность, КоАП...")
+    wait_msg = bot.send_message(message.chat.id, "Получаю фото...")
 
     try:
         file_id = message.photo[-1].file_id
@@ -2158,23 +2165,47 @@ def handle_photo(message):
         photo_b64 = base64.b64encode(photo_bytes).decode("utf-8")
         caption = message.caption or ""
 
-        context = build_context(caption) if caption else ""
+        image_content = {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": photo_b64}}
+
+        if caption:
+            # Подпись есть — сразу ищем по ней
+            search_query = caption
+        else:
+            # Шаг 1: описываем фото чтобы получить поисковый запрос
+            bot.edit_message_text("Определяю содержание фото...", message.chat.id, wait_msg.message_id)
+            search_query = claude_generate(
+                messages=[{"role": "user", "content": [
+                    image_content,
+                    {"type": "text", "text": "Опиши кратко что видно на фото."},
+                ]}],
+                max_tokens=150,
+                system=DESCRIBE_PROMPT,
+            ).strip()
+            print(f"[describe] Автоописание: {search_query[:120]}")
+
+        # Шаг 2: ищем статьи в базе законов
+        bot.edit_message_text("Подбираю нормативные требования...", message.chat.id, wait_msg.message_id)
+        context = build_context(search_query)
+
         context_block = (
             "=== ФРАГМЕНТЫ ИЗ НОРМАТИВНЫХ ИСТОЧНИКОВ ===\n" + context
             if context
             else "=== НОРМАТИВНЫЕ ИСТОЧНИКИ ===\nСтатьи не найдены — опирайся на нормативную базу системного промпта."
         )
 
-        text_part = (
-            context_block
-            + "\n\n=== ПОДПИСЬ ПОЛЬЗОВАТЕЛЯ ===\n"
-            + (caption if caption else "(подпись не указана)")
-        )
+        if caption:
+            caption_block = f"=== ПОДПИСЬ ПОЛЬЗОВАТЕЛЯ ===\n{caption}"
+        else:
+            caption_block = f"=== ПОДПИСЬ ПОЛЬЗОВАТЕЛЯ ===\n(не указана)\n\n=== АВТООПРЕДЕЛЁННОЕ СОДЕРЖАНИЕ ФОТО ===\n{search_query}"
 
+        text_part = context_block + "\n\n" + caption_block
+
+        # Шаг 3: полный комплексный анализ
+        bot.edit_message_text("Формирую комплексный отчёт...", message.chat.id, wait_msg.message_id)
         history = get_history(uid)
         answer = clean_answer(claude_generate(
             messages=history + [{"role": "user", "content": [
-                {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": photo_b64}},
+                image_content,
                 {"type": "text", "text": text_part},
             ]}],
             max_tokens=5000,
@@ -2182,7 +2213,7 @@ def handle_photo(message):
         ))
 
         increment_counter(uid)
-        add_to_history(uid, "user", f"[фото: {caption or 'без подписи'}]")
+        add_to_history(uid, "user", f"[фото: {caption or search_query[:60]}]")
         add_to_history(uid, "assistant", answer)
         bot.delete_message(message.chat.id, wait_msg.message_id)
         send_long_message(message.chat.id, answer)
