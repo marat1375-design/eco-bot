@@ -16,6 +16,7 @@ import os
 import re
 import time
 import json
+import threading
 import urllib3
 from datetime import date
 from bs4 import BeautifulSoup
@@ -2143,6 +2144,97 @@ DESCRIBE_PROMPT = """Ты — технический наблюдатель на
 пожароопасные материалы, нарушения порядка. Пиши сухо, техническими терминами, 1-3 предложения.
 Никаких оценок и выводов — только наблюдение."""
 
+# ── Media group buffering ──────────────────────────────────────────────────────
+_media_groups: dict = {}
+_media_groups_lock = threading.Lock()
+MEDIA_GROUP_TIMEOUT = 1.5   # секунды ожидания после последнего фото в серии
+MEDIA_GROUP_MAX_PHOTOS = 5  # максимум фото на один запрос
+
+
+def _download_photo(file_id: str) -> str:
+    """Download photo by file_id, convert to JPEG, return base64."""
+    file_info = bot.get_file(file_id)
+    file_url = f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{file_info.file_path}"
+    photo_bytes = requests.get(file_url, timeout=30).content
+    photo_bytes = convert_to_jpeg(photo_bytes)
+    return base64.b64encode(photo_bytes).decode("utf-8")
+
+
+def _process_media_group(media_group_id: str):
+    """Called by timer after all photos in a group have arrived."""
+    with _media_groups_lock:
+        if media_group_id not in _media_groups:
+            return
+        group = _media_groups.pop(media_group_id)
+
+    uid = group["uid"]
+    chat_id = group["chat_id"]
+    wait_msg_id = group["wait_msg_id"]
+    file_ids = group["file_ids"][:MEDIA_GROUP_MAX_PHOTOS]
+    caption = group["caption"]
+    n = len(file_ids)
+
+    try:
+        bot.edit_message_text(f"Скачиваю {n} фото...", chat_id, wait_msg_id)
+        image_blocks = []
+        for fid in file_ids:
+            b64 = _download_photo(fid)
+            image_blocks.append({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": b64}})
+
+        if caption:
+            search_query = caption
+        else:
+            bot.edit_message_text(f"Определяю содержание {n} фото...", chat_id, wait_msg_id)
+            search_query = claude_generate(
+                messages=[{"role": "user", "content": image_blocks + [
+                    {"type": "text", "text": "Опиши кратко что видно на фотографиях — как единую сцену."},
+                ]}],
+                max_tokens=200,
+                system=DESCRIBE_PROMPT,
+            ).strip()
+            print(f"[describe-group] {n} фото: {search_query[:120]}")
+
+        bot.edit_message_text("Подбираю нормативные требования...", chat_id, wait_msg_id)
+        context = build_context(search_query)
+
+        context_block = (
+            "=== ФРАГМЕНТЫ ИЗ НОРМАТИВНЫХ ИСТОЧНИКОВ ===\n" + context
+            if context
+            else "=== НОРМАТИВНЫЕ ИСТОЧНИКИ ===\nСтатьи не найдены — опирайся на нормативную базу системного промпта."
+        )
+
+        if caption:
+            caption_block = f"=== ПОДПИСЬ ПОЛЬЗОВАТЕЛЯ ===\n{caption}"
+        else:
+            caption_block = f"=== ПОДПИСЬ ПОЛЬЗОВАТЕЛЯ ===\n(не указана)\n\n=== АВТООПРЕДЕЛЁННОЕ СОДЕРЖАНИЕ ФОТО ===\n{search_query}"
+
+        series_note = f"=== СЕРИЯ ИЗ {n} ФОТО ===\nВсе {n} фотографий относятся к одному объекту/инциденту. Анализируй комплексно.\n\n"
+        text_part = series_note + context_block + "\n\n" + caption_block
+
+        bot.edit_message_text(f"Формирую комплексный отчёт по {n} фото...", chat_id, wait_msg_id)
+        history = get_history(uid)
+        answer = clean_answer(claude_generate(
+            messages=history + [{"role": "user", "content": image_blocks + [
+                {"type": "text", "text": text_part},
+            ]}],
+            max_tokens=5000,
+            system=PHOTO_SYSTEM_PROMPT,
+        ))
+
+        increment_counter(uid)
+        add_to_history(uid, "user", f"[серия {n} фото: {caption or search_query[:60]}]")
+        add_to_history(uid, "assistant", answer)
+        bot.delete_message(chat_id, wait_msg_id)
+        send_long_message(chat_id, answer)
+
+    except Exception as error:
+        print(f"[error media-group] {type(error).__name__}: {error}")
+        user_msg = "Произошла ошибка при обработке запроса. Попробуйте повторить через несколько секунд."
+        try:
+            bot.edit_message_text(user_msg, chat_id, wait_msg_id)
+        except Exception:
+            bot.send_message(chat_id, user_msg)
+
 
 @bot.message_handler(content_types=["photo"])
 def handle_photo(message):
@@ -2153,25 +2245,46 @@ def handle_photo(message):
     if not check_limit(uid):
         bot.send_message(message.chat.id, "Лимит запросов на сегодня исчерпан.")
         return
+
+    file_id = message.photo[-1].file_id
+    caption = message.caption or ""
+    media_group_id = message.media_group_id
+
+    # ── Серия фото (альбом) ───────────────────────────────────────────────────
+    if media_group_id:
+        with _media_groups_lock:
+            if media_group_id not in _media_groups:
+                wait_msg = bot.send_message(message.chat.id, "Получаю серию фото...")
+                _media_groups[media_group_id] = {
+                    "uid": uid,
+                    "chat_id": message.chat.id,
+                    "file_ids": [],
+                    "caption": "",
+                    "wait_msg_id": wait_msg.message_id,
+                    "timer": None,
+                }
+            group = _media_groups[media_group_id]
+            group["file_ids"].append(file_id)
+            if caption and not group["caption"]:
+                group["caption"] = caption
+            if group["timer"] is not None:
+                group["timer"].cancel()
+            timer = threading.Timer(MEDIA_GROUP_TIMEOUT, _process_media_group, args=[media_group_id])
+            timer.daemon = True
+            timer.start()
+            group["timer"] = timer
+        return
+
+    # ── Одиночное фото ────────────────────────────────────────────────────────
     wait_msg = bot.send_message(message.chat.id, "Получаю фото...")
 
     try:
-        file_id = message.photo[-1].file_id
-        file_info = bot.get_file(file_id)
-        file_url = f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{file_info.file_path}"
-
-        photo_bytes = requests.get(file_url, timeout=30).content
-        photo_bytes = convert_to_jpeg(photo_bytes)
-        photo_b64 = base64.b64encode(photo_bytes).decode("utf-8")
-        caption = message.caption or ""
-
+        photo_b64 = _download_photo(file_id)
         image_content = {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": photo_b64}}
 
         if caption:
-            # Подпись есть — сразу ищем по ней
             search_query = caption
         else:
-            # Шаг 1: описываем фото чтобы получить поисковый запрос
             bot.edit_message_text("Определяю содержание фото...", message.chat.id, wait_msg.message_id)
             search_query = claude_generate(
                 messages=[{"role": "user", "content": [
@@ -2183,7 +2296,6 @@ def handle_photo(message):
             ).strip()
             print(f"[describe] Автоописание: {search_query[:120]}")
 
-        # Шаг 2: ищем статьи в базе законов
         bot.edit_message_text("Подбираю нормативные требования...", message.chat.id, wait_msg.message_id)
         context = build_context(search_query)
 
@@ -2200,7 +2312,6 @@ def handle_photo(message):
 
         text_part = context_block + "\n\n" + caption_block
 
-        # Шаг 3: полный комплексный анализ
         bot.edit_message_text("Формирую комплексный отчёт...", message.chat.id, wait_msg.message_id)
         history = get_history(uid)
         answer = clean_answer(claude_generate(
