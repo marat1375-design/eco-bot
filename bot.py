@@ -158,21 +158,25 @@ load_counters()
 
 MAX_HISTORY = 6  # максимум сообщений на пользователя (3 пары user/assistant)
 USER_HISTORY: dict = {}
+_history_lock = threading.Lock()
 
 
 def get_history(user_id: int) -> list:
-    return list(USER_HISTORY.get(user_id, []))
+    with _history_lock:
+        return list(USER_HISTORY.get(user_id, []))
 
 
 def add_to_history(user_id: int, role: str, content: str):
-    history = USER_HISTORY.setdefault(user_id, [])
-    history.append({"role": role, "content": content})
-    if len(history) > MAX_HISTORY:
-        USER_HISTORY[user_id] = history[-MAX_HISTORY:]
+    with _history_lock:
+        history = USER_HISTORY.setdefault(user_id, [])
+        history.append({"role": role, "content": content})
+        if len(history) > MAX_HISTORY:
+            USER_HISTORY[user_id] = history[-MAX_HISTORY:]
 
 
 def clear_history(user_id: int):
-    USER_HISTORY.pop(user_id, None)
+    with _history_lock:
+        USER_HISTORY.pop(user_id, None)
 
 
 def is_admin(user_id: int) -> bool:
@@ -1962,28 +1966,6 @@ def send_long_message(chat_id, text: str):
 # ОБРАБОТЧИКИ TELEGRAM
 # ─────────────────────────────────────────────
 
-@bot.message_handler(commands=["start", "help"])
-def send_welcome(message):
-    bot.send_message(
-        message.chat.id,
-        "Эко Помощник ПККР 1.2\n\n"
-        "Пришли фото или опиши экологическое замечание.\n\n"
-        "Источник: Экологический кодекс РК N 400-VI.\n\n"
-        "Примеры:\n"
-        "- замазучено вокруг мусорки\n"
-        "- нет раздельного сбора отходов\n"
-        "- ртутные лампы лежат вместе с мусором\n"
-        "- нет журналов учёта отходов\n"
-        "- пластовая вода попала на грунт\n"
-        "- на факеле нет учётчика\n"
-        "- замазученный грунт не вывезен\n"
-        "- буровой шлам хранится без маркировки\n"
-        "- переполнена нефтяная ловушка на ДНС\n"
-        "- нет MSDS на химреагенты у подрядчика"
-    )
-
-
-
 @bot.message_handler(commands=["start"])
 def cmd_start(message):
     uid = message.from_user.id
@@ -2003,9 +1985,36 @@ def cmd_start(message):
         "— Анализировать фотографии объектов с экологической точки зрения\n\n"
         "Как использовать:\n"
         "Напишите описание нарушения или отправьте фото объекта (можно с подписью).\n\n"
+        "/help — примеры запросов\n"
         "/quota — остаток запросов на сегодня\n"
         "/reset — начать новый диалог\n\n"
         f"Осталось запросов сегодня: {get_remaining(uid)}"
+    )
+
+
+@bot.message_handler(commands=["help"])
+def cmd_help(message):
+    uid = message.from_user.id
+    if not is_allowed(uid):
+        bot.send_message(
+            message.chat.id,
+            "Доступ закрыт. Обратитесь к администратору для получения доступа."
+        )
+        return
+    bot.send_message(
+        message.chat.id,
+        "Примеры запросов:\n"
+        "- замазучено вокруг мусорки\n"
+        "- нет раздельного сбора отходов\n"
+        "- ртутные лампы лежат вместе с мусором\n"
+        "- нет журналов учёта отходов\n"
+        "- пластовая вода попала на грунт\n"
+        "- на факеле нет учётчика\n"
+        "- замазученный грунт не вывезен\n"
+        "- буровой шлам хранится без маркировки\n"
+        "- переполнена нефтяная ловушка на ДНС\n"
+        "- нет MSDS на химреагенты у подрядчика\n\n"
+        "Можно также отправить фото — с подписью или без."
     )
 
 
@@ -2338,7 +2347,7 @@ def handle_photo(message):
             bot.send_message(message.chat.id, user_msg)
 
 
-@bot.message_handler(func=lambda message: True)
+@bot.message_handler(content_types=["text"])
 def handle_text(message):
     uid = message.from_user.id
     if not is_allowed(uid):
@@ -2400,4 +2409,4 @@ def handle_text(message):
 
 
 print("БОТ ЗАПУЩЕН — Эко Помощник ПККР 1.2")
-bot.polling(none_stop=True, interval=1, timeout=60, long_polling_timeout=60)
+bot.polling(none_stop=True, interval=1, timeout=60, long_polling_timeout=60, threaded=True)
