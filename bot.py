@@ -2448,4 +2448,4 @@ def handle_text(message):
 
 
 print("БОТ ЗАПУЩЕН — Эко Помощник ПККР 1.2")
-bot.polling(none_stop=True, interval=1, timeout=60, long_polling_timeout=60, threaded=True)
+bot.polling(none_stop=True, interval=1, timeout=60, long_polling_timeout=60)
