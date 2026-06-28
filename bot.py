@@ -162,6 +162,52 @@ def save_counters():
         print(f"[counters] Ошибка сохранения: {e}")
 
 
+
+# ─────────────────────────────────────────────
+# ЗАГРУЗКА TXT-БАЗ ЗНАНИЙ
+# ─────────────────────────────────────────────
+
+_TXT_FILES = ["ecocode.txt", "sanpin1.txt", "sanpin2.txt", "atom.txt", "koap_final.txt", "nedra.txt"]
+TXT_BASES: dict = {}
+
+def load_txt_bases():
+    global TXT_BASES
+    for fname in _TXT_FILES:
+        if os.path.exists(fname):
+            try:
+                with open(fname, "r", encoding="utf-8") as f:
+                    TXT_BASES[fname] = f.read()
+                print(f"[txt] {fname}: {len(TXT_BASES[fname])} символов")
+            except Exception as e:
+                print(f"[txt] Ошибка {fname}: {e}")
+    print(f"[txt] Загружено файлов: {len(TXT_BASES)}")
+
+def search_txt_bases(query: str, max_chars: int = 7000) -> str:
+    if not TXT_BASES:
+        return ""
+    stop = {"что","как","где","при","для","это","есть","или","если","все","будет","нет"}
+    words = [w for w in re.findall(r"[а-яёa-z]{3,}", query.lower()) if w not in stop]
+    if not words:
+        return ""
+    scored = []
+    for fname, content in TXT_BASES.items():
+        for chunk in re.split(r"\n{2,}", content):
+            chunk = chunk.strip()
+            if len(chunk) < 60:
+                continue
+            cl = chunk.lower()
+            score = sum(1 for w in words if w in cl)
+            if score > 0:
+                scored.append((score, chunk))
+    scored.sort(key=lambda x: -x[0])
+    parts, total = [], 0
+    for _, chunk in scored[:30]:
+        if total + len(chunk) > max_chars:
+            break
+        parts.append(chunk)
+        total += len(chunk)
+    return "\n\n".join(parts)
+
 load_whitelist()
 load_counters()
 load_txt_bases()
@@ -1924,50 +1970,6 @@ def _fetch_fallback(law_key: str, query: str, limit: int = 4) -> str:
 
 # ─────────────────────────────────────────────
 # API БАЗЫ ЗАКОНОВ
-# ─────────────────────────────────────────────
-# ЗАГРУЗКА TXT-БАЗ ЗНАНИЙ
-# ─────────────────────────────────────────────
-
-_TXT_FILES = ["ecocode.txt", "sanpin1.txt", "sanpin2.txt", "atom.txt", "koap_final.txt", "nedra.txt"]
-TXT_BASES: dict = {}
-
-def load_txt_bases():
-    global TXT_BASES
-    for fname in _TXT_FILES:
-        if os.path.exists(fname):
-            try:
-                with open(fname, "r", encoding="utf-8") as f:
-                    TXT_BASES[fname] = f.read()
-                print(f"[txt] {fname}: {len(TXT_BASES[fname])} символов")
-            except Exception as e:
-                print(f"[txt] Ошибка {fname}: {e}")
-    print(f"[txt] Загружено файлов: {len(TXT_BASES)}")
-
-def search_txt_bases(query: str, max_chars: int = 7000) -> str:
-    if not TXT_BASES:
-        return ""
-    stop = {"что","как","где","при","для","это","есть","или","если","все","будет","нет"}
-    words = [w for w in re.findall(r"[а-яёa-z]{3,}", query.lower()) if w not in stop]
-    if not words:
-        return ""
-    scored = []
-    for fname, content in TXT_BASES.items():
-        for chunk in re.split(r"\n{2,}", content):
-            chunk = chunk.strip()
-            if len(chunk) < 60:
-                continue
-            cl = chunk.lower()
-            score = sum(1 for w in words if w in cl)
-            if score > 0:
-                scored.append((score, chunk))
-    scored.sort(key=lambda x: -x[0])
-    parts, total = [], 0
-    for _, chunk in scored[:30]:
-        if total + len(chunk) > max_chars:
-            break
-        parts.append(chunk)
-        total += len(chunk)
-    return "\n\n".join(parts)
 
 # ─────────────────────────────────────────────
 
