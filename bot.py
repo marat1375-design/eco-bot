@@ -167,7 +167,7 @@ def save_counters():
 # ЗАГРУЗКА TXT-БАЗ ЗНАНИЙ
 # ─────────────────────────────────────────────
 
-_TXT_FILES = ["ecocode.txt", "sanpin1.txt", "sanpin2.txt", "atom.txt", "koap_final.txt", "nedra.txt"]
+_TXT_FILES = ["ecocode.txt", "atom.txt", "koap_final.txt", "nedra.txt"]
 TXT_BASES: dict = {}
 
 def load_txt_bases():
