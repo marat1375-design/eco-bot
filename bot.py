@@ -23,6 +23,7 @@ from bs4 import BeautifulSoup
 from PIL import Image
 import pillow_heif
 from io import BytesIO
+from reference_search import format_reference_answer, is_reference_query, search_reference
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -167,7 +168,7 @@ def save_counters():
 # ЗАГРУЗКА TXT-БАЗ ЗНАНИЙ
 # ─────────────────────────────────────────────
 
-_TXT_FILES = ["ecocode.txt", "atom.txt", "koap_final.txt", "nedra.txt"]
+_TXT_FILES = ["ecocode.txt", "atom.txt", "koap_final.txt", "nedra.txt", "sanpin1.txt", "sanpin2.txt"]
 TXT_BASES: dict = {}
 
 def load_txt_bases():
@@ -183,25 +184,13 @@ def load_txt_bases():
     print(f"[txt] Загружено файлов: {len(TXT_BASES)}")
 
 def search_txt_bases(query: str, max_chars: int = 7000) -> str:
+    """Compatibility context for situation analysis, backed by ranked legal search."""
     if not TXT_BASES:
         return ""
-    stop = {"что","как","где","при","для","это","есть","или","если","все","будет","нет"}
-    words = [w for w in re.findall(r"[а-яёa-z]{3,}", query.lower()) if w not in stop]
-    if not words:
-        return ""
-    scored = []
-    for fname, content in TXT_BASES.items():
-        for chunk in re.split(r"\n{2,}", content):
-            chunk = chunk.strip()
-            if len(chunk) < 60:
-                continue
-            cl = chunk.lower()
-            score = sum(1 for w in words if w in cl)
-            if score > 0:
-                scored.append((score, chunk))
-    scored.sort(key=lambda x: -x[0])
+    hits = search_reference(query, TXT_BASES, (), max_results=30)
     parts, total = [], 0
-    for _, chunk in scored[:30]:
+    for hit in hits:
+        chunk = hit.entry.text
         if total + len(chunk) > max_chars:
             break
         parts.append(chunk)
@@ -2122,6 +2111,36 @@ def cmd_reset(message):
     bot.send_message(message.chat.id, "История диалога очищена. Начнём с чистого листа.")
 
 
+@bot.message_handler(commands=["search", "find", "article", "reference"])
+def cmd_reference(message):
+    uid = message.from_user.id
+    if not is_allowed(uid):
+        bot.send_message(message.chat.id, "Доступ закрыт. Обратитесь к администратору.")
+        return
+    if not check_limit(uid):
+        bot.send_message(message.chat.id, "Лимит запросов на сегодня исчерпан.")
+        return
+    query = re.sub(r"^/\w+(?:@\w+)?\s*", "", message.text or "").strip()
+    if not query:
+        bot.send_message(message.chat.id, "Укажите запрос после команды, например: /article статья 344 КоАП")
+        return
+    wait_msg = bot.send_message(message.chat.id, "Ищу по локальной нормативной базе...")
+    try:
+        answer = format_reference_answer(query, search_reference(query, TXT_BASES, ARTICLES))
+        increment_counter(uid)
+        add_to_history(uid, "user", message.text or query)
+        add_to_history(uid, "assistant", answer)
+        bot.delete_message(message.chat.id, wait_msg.message_id)
+        send_long_message(message.chat.id, answer)
+    except Exception as error:
+        print(f"[reference error] {type(error).__name__}: {error}")
+        bot.edit_message_text(
+            "Не удалось выполнить поиск по справочнику.",
+            message.chat.id,
+            wait_msg.message_id,
+        )
+
+
 @bot.message_handler(commands=["status"])
 def cmd_status(message):
     if not is_admin(message.from_user.id):
@@ -2445,6 +2464,25 @@ def handle_text(message):
     wait_msg = bot.send_message(message.chat.id, "Подбираю нормативные требования...")
 
     try:
+        # Справочные запросы обрабатываются только локальным детерминированным
+        # поиском: их текст и результаты не передаются Claude.
+        if is_reference_query(user_text):
+            bot.edit_message_text(
+                "Ищу по локальной нормативной базе...",
+                message.chat.id,
+                wait_msg.message_id,
+            )
+            answer = format_reference_answer(
+                user_text,
+                search_reference(user_text, TXT_BASES, ARTICLES),
+            )
+            increment_counter(uid)
+            add_to_history(uid, "user", user_text)
+            add_to_history(uid, "assistant", answer)
+            bot.delete_message(message.chat.id, wait_msg.message_id)
+            send_long_message(message.chat.id, answer)
+            return
+
         if not is_ecology_query(user_text):
             bot.edit_message_text(
                 "В текущей версии анализируются только экологические замечания "
